@@ -63,6 +63,13 @@ def login_page():
 def service_worker():
     return FileResponse("static/sw.js", media_type="application/javascript")
 
+@app.get("/news")
+def news_page(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return FileResponse("static/login.html")
+    return FileResponse("static/news.html")
+
 @app.get("/settings")
 def settings_page(request: Request):
     user = get_current_user(request)

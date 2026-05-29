@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heatmapper - News</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+  <nav class="top-nav">
+    <a href="/" class="nav-brand">
+      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="28" height="28" rx="6" fill="#1a1a1a"/>
+        <rect x="4" y="16" width="4" height="8" rx="1" fill="#e8913a"/>
+        <rect x="9.5" y="11" width="4" height="13" rx="1" fill="#e8913a" opacity="0.7"/>
+        <rect x="15" y="6" width="4" height="18" rx="1" fill="#e8913a" opacity="0.85"/>
+        <rect x="20.5" y="4" width="4" height="20" rx="1" fill="#e8913a"/>
+      </svg>
+      Heatmapper
+    </a>
+    <ul class="nav-links">
+      <li><a class="nav-link" href="/">Dashboard</a></li>
+      <li><a class="nav-link" href="/watchlist">Watchlist</a></li>
+      <li><a class="nav-link active" href="/news">News</a></li>
+      <li><a class="nav-link" href="/settings">Settings</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn-icon" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <a href="/settings" id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;text-decoration:none;" title="Settings">U</a>
+    </div>
+  </nav>
+
+  <main class="page-container">
+    <div class="page-header">
+      <h1 class="page-title">News Feed</h1>
+      <div class="flex items-center gap-3">
+        <div class="controls-bar">
+          <div class="input-group">
+            <label class="input-label" for="search-ticker">Search Ticker</label>
+            <div class="flex items-center gap-2">
+              <input class="input-field font-mono" id="search-ticker" type="text" placeholder="e.g. NVDA" style="width:110px;text-transform:uppercase" />
+              <button class="btn btn-primary" onclick="searchTicker()">Search</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="flex items-center gap-3 mb-4">
+      <div class="tab-group">
+        <button class="tab-btn active" id="filter-all" onclick="setFilter('all')">All</button>
+        <button class="tab-btn" id="filter-positive" onclick="setFilter('positive')">Positive</button>
+        <button class="tab-btn" id="filter-negative" onclick="setFilter('negative')">Negative</button>
+        <button class="tab-btn" id="filter-neutral" onclick="setFilter('neutral')">Neutral</button>
+      </div>
+      <span class="text-sm text-muted" id="article-count"></span>
+    </div>
+
+    <!-- News Feed -->
+    <div id="news-feed" class="flex flex-col gap-4">
+      <p class="text-sm text-muted" style="text-align:center;padding:var(--space-10) 0;">Loading news from your watchlist...</p>
+    </div>
+  </main>
+
+  <script>
+    let _allArticles = [];
+    let _currentFilter = "all";
+
+    async function loadUser() {
+      try {
+        const res = await fetch("/api/me");
+        if (!res.ok) { window.location.href = "/login"; return; }
+        const user = await res.json();
+        document.getElementById("user-avatar").textContent = user.username.charAt(0).toUpperCase();
+      } catch { window.location.href = "/login"; }
+    }
+
+    async function loadWatchlistNews() {
+      const feed = document.getElementById("news-feed");
+      setFeedMessage("Loading news from your watchlist...");
+
+      try {
+        const wlRes = await fetch("/api/watchlist");
+        if (!wlRes.ok) throw new Error();
+        const wlData = await wlRes.json();
+
+        if (!wlData.watchlist.length) {
+          setFeedMessage("Add stocks to your watchlist to see news here.");
+          return;
+        }
+
+        _allArticles = [];
+        const fetches = wlData.watchlist.map(w =>
+          fetch(`/api/news/${w.ticker}?limit=10`).then(r => r.json())
+        );
+        const results = await Promise.all(fetches);
+
+        for (const data of results) {
+          for (const a of data.articles) {
+            a.ticker = data.ticker;
+            _allArticles.push(a);
+          }
+        }
+
+        _allArticles.sort((a, b) => b.id - a.id);
+        renderFeed();
+      } catch {
+        setFeedMessage("Could not load news.");
+      }
+    }
+
+    async function searchTicker() {
+      const ticker = document.getElementById("search-ticker").value.trim().toUpperCase();
+      if (!ticker) return;
+
+      const feed = document.getElementById("news-feed");
+      setFeedMessage(`Searching news for ${ticker}...`);
+
+      try {
+        const res = await fetch(`/api/news/${ticker}?limit=10`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        _allArticles = data.articles.map(a => ({ ...a, ticker: data.ticker }));
+        renderFeed();
+      } catch {
+        setFeedMessage(`Could not load news for ${ticker}.`);
+      }
+    }
+
+    function setFilter(filter) {
+      _currentFilter = filter;
+      ["all", "positive", "negative", "neutral"].forEach(f => {
+        document.getElementById(`filter-${f}`).classList.toggle("active", f === filter);
+      });
+      renderFeed();
+    }
+
+    function setFeedMessage(msg) {
+      const feed = document.getElementById("news-feed");
+      feed.textContent = "";
+      const p = document.createElement("p");
+      p.className = "text-sm text-muted";
+      p.style.cssText = "text-align:center;padding:var(--space-10) 0;";
+      p.textContent = msg;
+      feed.appendChild(p);
+      document.getElementById("article-count").textContent = "";
+    }
+
+    function renderFeed() {
+      const feed = document.getElementById("news-feed");
+      const filtered = _currentFilter === "all"
+        ? _allArticles
+        : _allArticles.filter(a => a.sentiment_label === _currentFilter);
+
+      document.getElementById("article-count").textContent = `${filtered.length} articles`;
+
+      if (!filtered.length) {
+        setFeedMessage(_currentFilter === "all" ? "No articles found." : `No ${_currentFilter} articles.`);
+        return;
+      }
+
+      feed.textContent = "";
+      filtered.forEach(a => feed.appendChild(buildNewsCard(a)));
+    }
+
+    function buildNewsCard(a) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.style.padding = "var(--space-4) var(--space-6)";
+
+      const topRow = document.createElement("div");
+      topRow.className = "flex justify-between items-center";
+
+      const leftTop = document.createElement("div");
+      leftTop.className = "flex items-center gap-3";
+
+      const tickerBadge = document.createElement("span");
+      tickerBadge.className = "badge badge--info font-mono";
+      tickerBadge.textContent = a.ticker;
+
+      const sentBadge = document.createElement("span");
+      const badgeClass = a.sentiment_label === "positive" ? "badge--positive"
+        : a.sentiment_label === "negative" ? "badge--negative" : "badge--neutral";
+      sentBadge.className = `badge ${badgeClass}`;
+      const score = (a.sentiment_score >= 0 ? "+" : "") + a.sentiment_score.toFixed(2);
+      sentBadge.textContent = `${a.sentiment_label} (${score})`;
+
+      leftTop.appendChild(tickerBadge);
+      leftTop.appendChild(sentBadge);
+
+      const timeEl = document.createElement("span");
+      timeEl.className = "text-xs text-muted";
+      timeEl.textContent = a.published || "";
+
+      topRow.appendChild(leftTop);
+      topRow.appendChild(timeEl);
+      card.appendChild(topRow);
+
+      const title = document.createElement("p");
+      title.style.cssText = "font-weight:500;margin-top:var(--space-2);line-height:1.4;";
+      title.textContent = a.title;
+
+      try {
+        const u = a.url ? new URL(a.url) : null;
+        if (u && (u.protocol === "http:" || u.protocol === "https:")) {
+          const link = document.createElement("a");
+          link.href = u.href;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.style.cssText = "color:var(--color-text);text-decoration:none;";
+          link.appendChild(title);
+          card.appendChild(link);
+        } else {
+          card.appendChild(title);
+        }
+      } catch {
+        card.appendChild(title);
+      }
+
+      if (a.snippet) {
+        const snippet = document.createElement("p");
+        snippet.className = "text-sm text-secondary";
+        snippet.style.marginTop = "var(--space-1)";
+        snippet.textContent = a.snippet;
+        card.appendChild(snippet);
+      }
+
+      const source = document.createElement("p");
+      source.className = "text-xs text-muted";
+      source.style.marginTop = "var(--space-2)";
+      source.textContent = a.source;
+      card.appendChild(source);
+
+      return card;
+    }
+
+    document.getElementById("search-ticker").addEventListener("keydown", e => {
+      if (e.key === "Enter") searchTicker();
+    });
+
+    loadUser();
+    loadWatchlistNews();
+  </script>
+</body>
+</html>
