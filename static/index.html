@@ -28,11 +28,13 @@
   <div class="controls">
     <input id="ticker" type="text" value="SPY" placeholder="Ticker" style="width:90px; text-transform:uppercase" />
     <select id="metric" onchange="onMetricChange()">
+      <option value="probability">Price Probability</option>
       <option value="openInterest">Open Interest</option>
       <option value="volume">Volume</option>
       <option value="impliedVolatility">Implied Volatility</option>
     </select>
     <input id="expirations" type="number" value="6" min="1" max="12" style="width:70px" title="Max expirations" />
+    <input id="band" type="number" value="5" min="0.5" max="100" step="0.5" style="width:80px" title="Price band width $ (probability mode — lower = zoom in)" />
     <button onclick="load()">Load</button>
   </div>
 
@@ -57,6 +59,9 @@
 
     function onMetricChange() {
       const metric = document.getElementById("metric").value;
+      const isProb = metric === "probability";
+      // calls/puts/net tabs are meaningless for a single price distribution
+      document.querySelector(".tabs").style.display = isProb ? "none" : "flex";
       document.getElementById("tab-net").textContent =
         metric === "impliedVolatility" ? "IV Skew" : "Net";
       if (_data) load();
@@ -69,8 +74,13 @@
       const errEl  = document.getElementById("error");
       errEl.style.display = "none";
 
+      const band   = document.getElementById("band").value;
+      const url = metric === "probability"
+        ? `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`
+        : `/heatmap/${ticker}?metric=${metric}&max_expirations=${maxExp}`;
+
       try {
-        const res = await fetch(`/heatmap/${ticker}?metric=${metric}&max_expirations=${maxExp}`);
+        const res = await fetch(url);
         if (!res.ok) {
           const body = await res.json();
           throw new Error(body.detail || res.statusText);
@@ -95,17 +105,14 @@
       if (view === "net") {
         return [["0","#f85149"], ["0.5","#161b22"], ["1","#3fb950"]];
       }
-      if (metric === "impliedVolatility") {
-        // vol surface: low IV = cool blue, high IV = hot red
-        return [
-          ["0",   "#0d1117"],
-          ["0.25","#1f6feb"],
-          ["0.5", "#d29922"],
-          ["0.75","#f0883e"],
-          ["1",   "#f85149"],
-        ];
-      }
-      return [["0","#0d1117"], ["1","#58a6ff"]];
+      // blue (cold/low) → red (hot/high) for all single-side views
+      return [
+        ["0",    "#1a237e"],
+        ["0.25", "#1976d2"],
+        ["0.5",  "#fbc02d"],
+        ["0.75", "#e53935"],
+        ["1",    "#b71c1c"],
+      ];
     }
 
     function formatHover(metric) {
@@ -113,8 +120,76 @@
       return "%{z:,}";
     }
 
+    // blue (0%, default) -> red (high probability)
+    const PROB_COLORSCALE = [
+      ["0",    "#0d1117"],
+      ["0.001","#1a237e"],
+      ["0.35", "#1976d2"],
+      ["0.6",  "#fbc02d"],
+      ["0.8",  "#e53935"],
+      ["1",    "#b71c1c"],
+    ];
+
+    function renderProbability() {
+      const { strikes, expirations, probabilities, spot_price } = _data;
+
+      // Color each day relative to its own most-likely strike, otherwise a
+      // near-dated 0DTE spike (≈100% in one cell) saturates the scale and
+      // washes every other column to blue. True % is kept for the hover.
+      const colMax = expirations.map((_, j) =>
+        Math.max(...probabilities.map(row => row[j])) || 1
+      );
+      const zColor = probabilities.map(row => row.map((v, j) => v / colMax[j]));
+
+      const traces = [{
+        type: "heatmap",
+        x: expirations,
+        y: strikes,
+        z: zColor,
+        customdata: probabilities,
+        zmin: 0,
+        zmax: 1,
+        colorscale: PROB_COLORSCALE,
+        hoverongaps: false,
+        colorbar: {
+          title: "Likelihood",
+          tickvals: [0, 1],
+          ticktext: ["Low", "High"],
+          tickfont: { color: "#e6edf3" },
+          titlefont: { color: "#e6edf3" },
+        },
+        hovertemplate: "Price ≈ $%{y}<br>Expiry: %{x}<br>P ≈ %{customdata:.2f}%<extra></extra>",
+      }];
+
+      if (spot_price != null) {
+        traces.push({
+          type: "scatter",
+          mode: "lines+markers",
+          x: expirations,
+          y: Array(expirations.length).fill(spot_price),
+          line: { color: "#ffffff", width: 2, dash: "dot" },
+          marker: { size: 10, color: "#ffffff", symbol: "circle", line: { color: "#111", width: 1.5 } },
+          name: `Spot $${spot_price.toFixed(2)}`,
+          hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
+        });
+      }
+
+      Plotly.newPlot("plot", traces, {
+        paper_bgcolor: "#0d1117",
+        plot_bgcolor:  "#0d1117",
+        font: { color: "#e6edf3", family: "monospace" },
+        xaxis: { title: "Expiration", type: "category", tickangle: -30, gridcolor: "#21262d" },
+        yaxis: { title: "Price",      gridcolor: "#21262d" },
+        margin: { t: 20, r: 110, b: 80, l: 70 },
+        showlegend: spot_price != null,
+        legend: { x: 1.1, y: 1, font: { color: "#e6edf3" } },
+      }, { responsive: true });
+    }
+
     function render() {
-      const { strikes, expirations, calls, puts, metric } = _data;
+      if (_data && _data.metric === "probability") { renderProbability(); return; }
+
+      const { strikes, expirations, calls, puts, metric, spot_price } = _data;
 
       let z;
       if (_view === "calls") z = calls;
@@ -125,7 +200,7 @@
         ? NET_LABELS[metric]
         : metric === "impliedVolatility" ? "Implied Volatility" : metric;
 
-      Plotly.newPlot("plot", [{
+      const traces = [{
         type: "heatmap",
         x: expirations,
         y: strikes,
@@ -134,16 +209,36 @@
         hoverongaps: false,
         colorbar: { title: label, tickfont: { color: "#e6edf3" }, titlefont: { color: "#e6edf3" } },
         hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${formatHover(metric)}<extra></extra>`,
-      }], {
+      }];
+
+      if (spot_price != null) {
+        traces.push({
+          type: "scatter",
+          mode: "lines+markers",
+          x: expirations,
+          y: Array(expirations.length).fill(spot_price),
+          line: { color: "#ffffff", width: 2, dash: "dot" },
+          marker: { size: 10, color: "#ffffff", symbol: "circle", line: { color: "#111", width: 1.5 } },
+          name: `Spot $${spot_price.toFixed(2)}`,
+          hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
+        });
+      }
+
+      Plotly.newPlot("plot", traces, {
         paper_bgcolor: "#0d1117",
         plot_bgcolor:  "#0d1117",
         font: { color: "#e6edf3", family: "monospace" },
-        xaxis: { title: "Expiration", tickangle: -30, gridcolor: "#21262d" },
+        xaxis: { title: "Expiration", type: "category", tickangle: -30, gridcolor: "#21262d" },
         yaxis: { title: "Strike",     gridcolor: "#21262d" },
         margin: { t: 20, r: 100, b: 80, l: 70 },
+        showlegend: spot_price != null,
+        legend: { x: 1.08, y: 1, font: { color: "#e6edf3" } },
       }, { responsive: true });
     }
 
+    // sync tab visibility to the default metric, then load
+    document.querySelector(".tabs").style.display =
+      document.getElementById("metric").value === "probability" ? "none" : "flex";
     load();
   </script>
 </body>
