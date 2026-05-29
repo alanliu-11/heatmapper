@@ -4,3 +4,7 @@ yfinance
 pandas
 python-dotenv
 PyJWT
+vaderSentiment
+requests
+pywebpush
+cryptography

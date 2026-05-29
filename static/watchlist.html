@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heatmapper - Watchlist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+  <!-- Top Nav -->
+  <nav class="top-nav">
+    <a href="/" class="nav-brand">
+      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="28" height="28" rx="6" fill="#1a1a1a"/>
+        <rect x="4" y="16" width="4" height="8" rx="1" fill="#e8913a"/>
+        <rect x="9.5" y="11" width="4" height="13" rx="1" fill="#e8913a" opacity="0.7"/>
+        <rect x="15" y="6" width="4" height="18" rx="1" fill="#e8913a" opacity="0.85"/>
+        <rect x="20.5" y="4" width="4" height="20" rx="1" fill="#e8913a"/>
+      </svg>
+      Heatmapper
+    </a>
+    <ul class="nav-links">
+      <li><a class="nav-link" href="/">Dashboard</a></li>
+      <li><a class="nav-link active" href="/watchlist">Watchlist</a></li>
+      <li><a class="nav-link" href="#">News</a></li>
+      <li><a class="nav-link" href="#">Settings</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn-icon" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <div id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;" onclick="handleLogout()" title="Sign out">U</div>
+    </div>
+  </nav>
+
+  <main class="page-container">
+    <div class="page-header">
+      <h1 class="page-title">Watchlist</h1>
+    </div>
+
+    <!-- Add Ticker -->
+    <div class="card mb-4">
+      <div class="controls-bar">
+        <div class="input-group">
+          <label class="input-label" for="add-ticker">Add Stock</label>
+          <input class="input-field font-mono" id="add-ticker" type="text" placeholder="e.g. AAPL" style="width:120px;text-transform:uppercase" />
+        </div>
+        <div class="input-group" style="justify-content:flex-end">
+          <label class="input-label">&nbsp;</label>
+          <button class="btn btn-primary" onclick="addTicker()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            Add to Watchlist
+          </button>
+        </div>
+      </div>
+      <div id="add-error" class="error-msg mt-4"></div>
+    </div>
+
+    <!-- Watchlist Grid -->
+    <div id="watchlist-grid" class="dashboard-grid dashboard-grid--three-col">
+      <p class="text-sm text-muted" style="grid-column:1/-1;text-align:center;padding:var(--space-10) 0;">Loading watchlist...</p>
+    </div>
+  </main>
+
+  <script>
+    async function loadUser() {
+      try {
+        const res = await fetch("/api/me");
+        if (!res.ok) { window.location.href = "/login"; return; }
+        const user = await res.json();
+        const avatar = document.getElementById("user-avatar");
+        avatar.textContent = user.username.charAt(0).toUpperCase();
+        avatar.title = `Signed in as ${user.username} (click to sign out)`;
+      } catch { window.location.href = "/login"; }
+    }
+
+    async function handleLogout() {
+      await fetch("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    }
+
+    async function loadWatchlist() {
+      const grid = document.getElementById("watchlist-grid");
+
+      try {
+        const [wlRes, sumRes] = await Promise.all([
+          fetch("/api/watchlist"),
+          fetch("/api/watchlist/summary"),
+        ]);
+        if (!wlRes.ok || !sumRes.ok) throw new Error();
+        const wlData = await wlRes.json();
+        const sumData = await sumRes.json();
+
+        const summaryMap = {};
+        sumData.summaries.forEach(s => { summaryMap[s.ticker] = s; });
+
+        grid.textContent = "";
+
+        if (!wlData.watchlist.length) {
+          const p = document.createElement("p");
+          p.className = "text-sm text-muted";
+          p.style.cssText = "grid-column:1/-1;text-align:center;padding:var(--space-10) 0;";
+          p.textContent = "Your watchlist is empty. Add a stock above to get started.";
+          grid.appendChild(p);
+          return;
+        }
+
+        for (const item of wlData.watchlist) {
+          const summary = summaryMap[item.ticker] || { avg_sentiment: 0, sentiment_label: "neutral", article_count: 0 };
+          grid.appendChild(buildWatchlistCard(item.ticker, summary));
+        }
+      } catch {
+        grid.textContent = "";
+        const p = document.createElement("p");
+        p.className = "text-sm text-muted";
+        p.style.cssText = "grid-column:1/-1;text-align:center;padding:var(--space-10) 0;";
+        p.textContent = "Could not load watchlist.";
+        grid.appendChild(p);
+      }
+    }
+
+    function buildWatchlistCard(ticker, summary) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.id = `wl-card-${ticker}`;
+
+      const header = document.createElement("div");
+      header.className = "card-header";
+
+      const titleWrap = document.createElement("div");
+      const title = document.createElement("h3");
+      title.className = "card-title font-mono";
+      title.textContent = ticker;
+      titleWrap.appendChild(title);
+
+      const actions = document.createElement("div");
+      actions.className = "flex items-center gap-2";
+
+      const viewBtn = document.createElement("button");
+      viewBtn.className = "btn btn-secondary";
+      viewBtn.textContent = "View";
+      viewBtn.style.fontSize = "var(--text-xs)";
+      viewBtn.style.padding = "var(--space-1) var(--space-3)";
+      viewBtn.addEventListener("click", () => { window.location.href = `/?ticker=${ticker}`; });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "card-menu-btn";
+      removeBtn.title = "Remove from watchlist";
+      const xSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      xSvg.setAttribute("width", "14");
+      xSvg.setAttribute("height", "14");
+      xSvg.setAttribute("viewBox", "0 0 24 24");
+      xSvg.setAttribute("fill", "none");
+      xSvg.setAttribute("stroke", "currentColor");
+      xSvg.setAttribute("stroke-width", "2");
+      const p1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p1.setAttribute("d", "M18 6L6 18");
+      const p2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p2.setAttribute("d", "M6 6l12 12");
+      xSvg.appendChild(p1);
+      xSvg.appendChild(p2);
+      removeBtn.appendChild(xSvg);
+      removeBtn.addEventListener("click", () => removeTicker(ticker));
+
+      actions.appendChild(viewBtn);
+      actions.appendChild(removeBtn);
+      header.appendChild(titleWrap);
+      header.appendChild(actions);
+      card.appendChild(header);
+
+      // Sentiment display
+      const sentRow = document.createElement("div");
+      sentRow.className = "flex justify-between items-center mt-4";
+
+      const sentLabel = document.createElement("span");
+      sentLabel.className = "text-sm text-secondary";
+      sentLabel.textContent = "Avg. Sentiment";
+
+      const badge = document.createElement("span");
+      const badgeClass = summary.sentiment_label === "positive" ? "badge--positive"
+        : summary.sentiment_label === "negative" ? "badge--negative" : "badge--neutral";
+      badge.className = `badge ${badgeClass}`;
+      const scoreText = (summary.avg_sentiment >= 0 ? "+" : "") + summary.avg_sentiment.toFixed(3);
+      badge.textContent = `${summary.sentiment_label} (${scoreText})`;
+
+      sentRow.appendChild(sentLabel);
+      sentRow.appendChild(badge);
+      card.appendChild(sentRow);
+
+      const articlesRow = document.createElement("div");
+      articlesRow.className = "flex justify-between items-center mt-2";
+      const artLabel = document.createElement("span");
+      artLabel.className = "text-sm text-secondary";
+      artLabel.textContent = "Articles tracked";
+      const artCount = document.createElement("span");
+      artCount.className = "font-semibold font-mono";
+      artCount.textContent = summary.article_count;
+      articlesRow.appendChild(artLabel);
+      articlesRow.appendChild(artCount);
+      card.appendChild(articlesRow);
+
+      return card;
+    }
+
+    async function addTicker() {
+      const input = document.getElementById("add-ticker");
+      const errEl = document.getElementById("add-error");
+      errEl.style.display = "none";
+      const ticker = input.value.trim().toUpperCase();
+      if (!ticker) return;
+
+      try {
+        const res = await fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker }),
+        });
+        if (!res.ok) throw new Error("Failed to add");
+
+        // Pre-fetch news for this ticker so sentiment is available
+        await fetch(`/api/news/${ticker}?limit=5`);
+
+        input.value = "";
+        loadWatchlist();
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.style.display = "block";
+      }
+    }
+
+    async function removeTicker(ticker) {
+      await fetch(`/api/watchlist/${ticker}`, { method: "DELETE" });
+      const card = document.getElementById(`wl-card-${ticker}`);
+      if (card) card.remove();
+      // Reload to check if empty
+      loadWatchlist();
+    }
+
+    // Allow Enter key to add
+    document.getElementById("add-ticker").addEventListener("keydown", e => {
+      if (e.key === "Enter") addTicker();
+    });
+
+    loadUser();
+    loadWatchlist();
+  </script>
+</body>
+</html>

@@ -27,7 +27,7 @@
 
     <ul class="nav-links">
       <li><a class="nav-link active" href="/">Dashboard</a></li>
-      <li><a class="nav-link" href="#">Watchlist</a></li>
+      <li><a class="nav-link" href="/watchlist">Watchlist</a></li>
       <li><a class="nav-link" href="#">News</a></li>
       <li><a class="nav-link" href="#">Settings</a></li>
     </ul>
@@ -155,15 +155,17 @@
           </div>
         </div>
 
-        <!-- News Placeholder Card -->
+        <!-- News Card -->
         <div class="card">
           <div class="card-header">
             <h3 class="card-title">Latest News</h3>
-            <span class="badge badge--neutral">Coming Soon</span>
+            <button class="card-menu-btn" onclick="loadNews()" title="Refresh news">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            </button>
           </div>
-          <p class="text-sm text-muted" style="padding:var(--space-8) 0;text-align:center;">
-            Sentiment-powered news feed will appear here.
-          </p>
+          <div id="news-list" class="flex flex-col gap-3">
+            <p class="text-sm text-muted" style="text-align:center;padding:var(--space-4) 0;">Loading news...</p>
+          </div>
         </div>
 
       </div>
@@ -262,6 +264,7 @@
         _data = await res.json();
         updateSidebar(_data);
         render();
+        loadNews();
       } catch (e) {
         errEl.textContent = e.message;
         errEl.style.display = "block";
@@ -411,6 +414,85 @@
       Plotly.newPlot("plot", traces, layout, { responsive: true });
     }
 
+    function setNewsMessage(msg) {
+      const c = document.getElementById("news-list");
+      c.textContent = "";
+      const p = document.createElement("p");
+      p.className = "text-sm text-muted";
+      p.style.cssText = "text-align:center;padding:var(--space-4) 0;";
+      p.textContent = msg;
+      c.appendChild(p);
+    }
+
+    function buildNewsItem(a) {
+      const item = document.createElement("div");
+      item.className = "news-item";
+
+      const topRow = document.createElement("div");
+      topRow.className = "flex justify-between items-center gap-2";
+
+      const badge = document.createElement("span");
+      const badgeClass = a.sentiment_label === "positive" ? "badge--positive"
+        : a.sentiment_label === "negative" ? "badge--negative" : "badge--neutral";
+      badge.className = `badge ${badgeClass}`;
+      badge.textContent = a.sentiment_label;
+
+      const time = document.createElement("span");
+      time.className = "text-xs text-muted";
+      time.textContent = a.published || "";
+
+      topRow.appendChild(badge);
+      topRow.appendChild(time);
+      item.appendChild(topRow);
+
+      const title = document.createElement("p");
+      title.className = "news-title";
+      title.textContent = a.title;
+
+      try {
+        const u = a.url ? new URL(a.url) : null;
+        if (u && (u.protocol === "http:" || u.protocol === "https:")) {
+          const link = document.createElement("a");
+          link.href = u.href;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.style.cssText = "color:var(--color-text);text-decoration:none;";
+          link.appendChild(title);
+          item.appendChild(link);
+        } else {
+          item.appendChild(title);
+        }
+      } catch {
+        item.appendChild(title);
+      }
+
+      const source = document.createElement("p");
+      source.className = "text-xs text-secondary";
+      source.textContent = a.source;
+      item.appendChild(source);
+
+      return item;
+    }
+
+    async function loadNews() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      const container = document.getElementById("news-list");
+      setNewsMessage("Loading...");
+
+      try {
+        const res = await fetch(`/api/news/${ticker}?limit=5`);
+        if (!res.ok) throw new Error("Failed to load news");
+        const data = await res.json();
+
+        if (!data.articles.length) { setNewsMessage("No news found."); return; }
+
+        container.textContent = "";
+        data.articles.forEach(a => container.appendChild(buildNewsItem(a)));
+      } catch {
+        setNewsMessage("Could not load news.");
+      }
+    }
+
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
@@ -427,10 +509,56 @@
       window.location.href = "/login";
     }
 
+    async function initPush() {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        const existing = await reg.pushManager.getSubscription();
+        if (existing) return;
+
+        const res = await fetch("/api/push/vapid-key");
+        const { publicKey } = await res.json();
+        if (!publicKey) return;
+
+        const btn = document.querySelector('[title="Notifications"]');
+        btn.addEventListener("click", async () => {
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") return;
+
+          const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
+          });
+
+          await fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subscription: sub.toJSON() }),
+          });
+
+          btn.style.color = "var(--color-accent-green)";
+          btn.title = "Notifications enabled";
+        });
+      } catch { /* push not available */ }
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(base64);
+      const arr = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    }
+
     // Init
+    const urlTicker = new URLSearchParams(window.location.search).get("ticker");
+    if (urlTicker) document.getElementById("ticker").value = urlTicker.toUpperCase();
     loadUser();
     onMetricChange();
     load();
+    loadNews();
+    initPush();
   </script>
 </body>
 </html>

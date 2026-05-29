@@ -422,6 +422,31 @@ select.input-field {
 .badge--info     { background: #eff6ff; color: var(--color-accent-blue); }
 
 
+/* --- News items --- */
+.news-item {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.news-item:last-child {
+  border-bottom: none;
+}
+
+.news-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.news-item a:hover .news-title {
+  color: var(--color-primary);
+}
+
+
 /* --- Heatmap plot container --- */
 .plot-container {
   width: 100%;

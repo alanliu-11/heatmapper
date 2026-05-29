@@ -4,9 +4,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
 from processor import build_heatmap, build_probability_heatmap
-from database import init_db
+from database import init_db, get_db
 from auth import create_user, authenticate, create_token, verify_token
+from news_scraper import scrape_news
+from sentiment import analyze_articles
+from notifications import VAPID_PUBLIC_KEY
 import sqlite3
+import json
 
 app = FastAPI(title="Options Heatmap")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -26,6 +30,9 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class WatchlistRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=10)
 
 
 def get_current_user(request: Request) -> dict | None:
@@ -51,6 +58,17 @@ def register_page():
 @app.get("/login")
 def login_page():
     return FileResponse("static/login.html")
+
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse("static/sw.js", media_type="application/javascript")
+
+@app.get("/watchlist")
+def watchlist_page(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return FileResponse("static/login.html")
+    return FileResponse("static/watchlist.html")
 
 
 # --- Auth API ---
@@ -130,3 +148,166 @@ def probability(
 def refresh(ticker: str):
     invalidate(ticker)
     return {"status": "invalidated", "ticker": ticker.upper()}
+
+
+# --- News API ---
+
+NEWS_CACHE_TTL = 15 * 60
+
+@app.get("/api/news/{ticker}")
+def get_news(ticker: str, limit: int = Query(default=10, ge=1, le=50)):
+    ticker = ticker.upper()
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT fetched_at FROM news WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+
+        import time
+        needs_fetch = row is None or (
+            time.time() - time.mktime(time.strptime(row["fetched_at"], "%Y-%m-%d %H:%M:%S"))
+            > NEWS_CACHE_TTL
+        )
+
+        if needs_fetch:
+            articles = scrape_news(ticker)
+            articles = analyze_articles(articles)
+            conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
+            for a in articles:
+                conn.execute(
+                    """INSERT INTO news (ticker, title, source, url, snippet, published,
+                       sentiment_score, sentiment_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (ticker, a["title"], a["source"], a["url"], a["snippet"],
+                     a["published"], a["sentiment"]["compound"], a["sentiment"]["label"]),
+                )
+            conn.commit()
+
+        rows = conn.execute(
+            "SELECT id, title, source, url, snippet, published, sentiment_score, sentiment_label, fetched_at "
+            "FROM news WHERE ticker = ? ORDER BY fetched_at DESC LIMIT ?",
+            (ticker, limit),
+        ).fetchall()
+
+        return {"ticker": ticker, "articles": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+# --- Watchlist API ---
+
+def _require_user(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+@app.get("/api/watchlist")
+def get_watchlist(request: Request):
+    user = _require_user(request)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT ticker, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
+            (user["id"],),
+        ).fetchall()
+        return {"watchlist": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+@app.post("/api/watchlist")
+def add_to_watchlist(body: WatchlistRequest, request: Request):
+    user = _require_user(request)
+    ticker = body.ticker.upper().strip()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist (user_id, ticker) VALUES (?, ?)",
+            (user["id"], ticker),
+        )
+        conn.commit()
+        return {"ok": True, "ticker": ticker}
+    finally:
+        conn.close()
+
+@app.delete("/api/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str, request: Request):
+    user = _require_user(request)
+    ticker = ticker.upper().strip()
+    conn = get_db()
+    try:
+        conn.execute(
+            "DELETE FROM watchlist WHERE user_id = ? AND ticker = ?",
+            (user["id"], ticker),
+        )
+        conn.commit()
+        return {"ok": True, "ticker": ticker}
+    finally:
+        conn.close()
+
+@app.get("/api/watchlist/summary")
+def watchlist_summary(request: Request):
+    """Return watchlist tickers with their latest sentiment summary."""
+    user = _require_user(request)
+    conn = get_db()
+    try:
+        tickers = conn.execute(
+            "SELECT ticker FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
+            (user["id"],),
+        ).fetchall()
+
+        summaries = []
+        for row in tickers:
+            t = row["ticker"]
+            latest = conn.execute(
+                "SELECT sentiment_score, sentiment_label FROM news WHERE ticker = ? "
+                "ORDER BY fetched_at DESC LIMIT 5",
+                (t,),
+            ).fetchall()
+            avg_score = 0.0
+            if latest:
+                avg_score = sum(r["sentiment_score"] for r in latest) / len(latest)
+            label = "positive" if avg_score >= 0.05 else "negative" if avg_score <= -0.05 else "neutral"
+            summaries.append({
+                "ticker": t,
+                "avg_sentiment": round(avg_score, 3),
+                "sentiment_label": label,
+                "article_count": len(latest),
+            })
+        return {"summaries": summaries}
+    finally:
+        conn.close()
+
+
+# --- Push Notifications API ---
+
+@app.get("/api/push/vapid-key")
+def get_vapid_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: Request):
+    user = _require_user(request)
+    body = await request.json()
+    sub_json = json.dumps(body.get("subscription", body))
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO push_subscriptions (user_id, subscription_json) VALUES (?, ?)",
+            (user["id"], sub_json),
+        )
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+@app.delete("/api/push/subscribe")
+def push_unsubscribe(request: Request):
+    user = _require_user(request)
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM push_subscriptions WHERE user_id = ?", (user["id"],))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
