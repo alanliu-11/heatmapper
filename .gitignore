@@ -7,3 +7,6 @@ __pycache__/
 
 # Database
 *.db
+
+# Linter cache
+.ruff_cache/
