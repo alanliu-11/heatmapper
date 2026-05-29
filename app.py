@@ -63,6 +63,13 @@ def login_page():
 def service_worker():
     return FileResponse("static/sw.js", media_type="application/javascript")
 
+@app.get("/settings")
+def settings_page(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return FileResponse("static/login.html")
+    return FileResponse("static/settings.html")
+
 @app.get("/watchlist")
 def watchlist_page(request: Request):
     user = get_current_user(request)
@@ -109,7 +116,48 @@ def me(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT email FROM users WHERE id = ?", (user["id"],)).fetchone()
+        user["email"] = row["email"] if row else ""
+        return user
+    finally:
+        conn.close()
+
+class UpdateEmailRequest(BaseModel):
+    email: str = Field(max_length=255)
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+@app.put("/api/me/email")
+def update_email(body: UpdateEmailRequest, request: Request):
+    user = _require_user(request)
+    conn = get_db()
+    try:
+        conn.execute("UPDATE users SET email = ? WHERE id = ?", (body.email.strip(), user["id"]))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+@app.put("/api/me/password")
+def change_password(body: ChangePasswordRequest, request: Request):
+    from auth import authenticate, _hash_password
+    user = _require_user(request)
+    if not authenticate(user["username"], body.current_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (_hash_password(body.new_password), user["id"]),
+        )
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
 
 
 # --- Heatmap API ---

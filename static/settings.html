@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heatmapper - Settings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+  <nav class="top-nav">
+    <a href="/" class="nav-brand">
+      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="28" height="28" rx="6" fill="#1a1a1a"/>
+        <rect x="4" y="16" width="4" height="8" rx="1" fill="#e8913a"/>
+        <rect x="9.5" y="11" width="4" height="13" rx="1" fill="#e8913a" opacity="0.7"/>
+        <rect x="15" y="6" width="4" height="18" rx="1" fill="#e8913a" opacity="0.85"/>
+        <rect x="20.5" y="4" width="4" height="20" rx="1" fill="#e8913a"/>
+      </svg>
+      Heatmapper
+    </a>
+    <ul class="nav-links">
+      <li><a class="nav-link" href="/">Dashboard</a></li>
+      <li><a class="nav-link" href="/watchlist">Watchlist</a></li>
+      <li><a class="nav-link" href="#">News</a></li>
+      <li><a class="nav-link active" href="/settings">Settings</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn-icon" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <div id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);">U</div>
+    </div>
+  </nav>
+
+  <main class="page-container" style="max-width:720px;">
+    <div class="page-header">
+      <h1 class="page-title">Settings</h1>
+    </div>
+
+    <!-- Account Section -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h2 class="card-title">Account</h2>
+      </div>
+      <div class="flex flex-col gap-4">
+        <div class="flex justify-between items-center">
+          <span class="text-sm text-secondary">Username</span>
+          <span class="font-semibold font-mono" id="settings-username">--</span>
+        </div>
+        <div class="divider"></div>
+        <div class="flex justify-between items-center">
+          <div>
+            <span class="text-sm text-secondary">Email</span>
+            <p class="text-xs text-muted mt-2">Used for weekly digest emails</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input class="input-field" id="settings-email" type="email" placeholder="your@email.com" style="width:220px;" />
+            <button class="btn btn-secondary" onclick="saveEmail()">Save</button>
+          </div>
+        </div>
+        <div id="email-msg" class="text-sm mt-2" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- Password Section -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h2 class="card-title">Change Password</h2>
+      </div>
+      <div class="flex flex-col gap-4">
+        <div class="input-group">
+          <label class="input-label" for="current-password">Current Password</label>
+          <input class="input-field" id="current-password" type="password" style="max-width:300px;" autocomplete="current-password" />
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="new-password">New Password</label>
+          <input class="input-field" id="new-password" type="password" style="max-width:300px;" autocomplete="new-password" />
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="confirm-password">Confirm New Password</label>
+          <input class="input-field" id="confirm-password" type="password" style="max-width:300px;" autocomplete="new-password" />
+        </div>
+        <div>
+          <button class="btn btn-secondary" onclick="changePassword()">Update Password</button>
+        </div>
+        <div id="password-msg" class="text-sm mt-2" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- Notifications Section -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h2 class="card-title">Notifications</h2>
+      </div>
+      <div class="flex flex-col gap-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <span class="text-sm">Push Notifications</span>
+            <p class="text-xs text-muted mt-2">Get alerts when sentiment shifts on your watched stocks</p>
+          </div>
+          <button class="btn btn-secondary" id="push-toggle-btn" onclick="togglePush()">Enable</button>
+        </div>
+        <div class="divider"></div>
+        <div class="flex justify-between items-center">
+          <div>
+            <span class="text-sm">Weekly Email Digest</span>
+            <p class="text-xs text-muted mt-2">Receive a weekly summary of your watchlist sentiment</p>
+          </div>
+          <span class="badge badge--neutral" id="digest-status">Add email above</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sign Out -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Session</h2>
+      </div>
+      <div class="flex justify-between items-center">
+        <div>
+          <span class="text-sm">Sign out of your account</span>
+          <p class="text-xs text-muted mt-2">You'll need to sign back in to access your dashboard</p>
+        </div>
+        <button class="btn btn-primary" style="background:var(--color-accent-red);border-color:var(--color-accent-red);" onclick="handleLogout()">Sign Out</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    async function loadUser() {
+      try {
+        const res = await fetch("/api/me");
+        if (!res.ok) { window.location.href = "/login"; return; }
+        const user = await res.json();
+        document.getElementById("user-avatar").textContent = user.username.charAt(0).toUpperCase();
+        document.getElementById("settings-username").textContent = user.username;
+        if (user.email) {
+          document.getElementById("settings-email").value = user.email;
+          document.getElementById("digest-status").textContent = "Active";
+          document.getElementById("digest-status").className = "badge badge--positive";
+        }
+      } catch { window.location.href = "/login"; }
+    }
+
+    async function handleLogout() {
+      await fetch("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    }
+
+    function showMsg(id, text, isError) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.style.display = "block";
+      el.style.color = isError ? "var(--color-accent-red)" : "var(--color-accent-green)";
+      setTimeout(() => { el.style.display = "none"; }, 4000);
+    }
+
+    async function saveEmail() {
+      const email = document.getElementById("settings-email").value.trim();
+      try {
+        const res = await fetch("/api/me/email", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.detail || "Failed"); }
+        showMsg("email-msg", "Email saved.", false);
+        if (email) {
+          document.getElementById("digest-status").textContent = "Active";
+          document.getElementById("digest-status").className = "badge badge--positive";
+        } else {
+          document.getElementById("digest-status").textContent = "Add email above";
+          document.getElementById("digest-status").className = "badge badge--neutral";
+        }
+      } catch (e) { showMsg("email-msg", e.message, true); }
+    }
+
+    async function changePassword() {
+      const current = document.getElementById("current-password").value;
+      const newPw = document.getElementById("new-password").value;
+      const confirm = document.getElementById("confirm-password").value;
+
+      if (newPw !== confirm) { showMsg("password-msg", "Passwords do not match.", true); return; }
+      if (newPw.length < 6) { showMsg("password-msg", "Password must be at least 6 characters.", true); return; }
+
+      try {
+        const res = await fetch("/api/me/password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ current_password: current, new_password: newPw }),
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.detail || "Failed"); }
+        showMsg("password-msg", "Password updated.", false);
+        document.getElementById("current-password").value = "";
+        document.getElementById("new-password").value = "";
+        document.getElementById("confirm-password").value = "";
+      } catch (e) { showMsg("password-msg", e.message, true); }
+    }
+
+    async function togglePush() {
+      const btn = document.getElementById("push-toggle-btn");
+
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        btn.textContent = "Not supported";
+        btn.disabled = true;
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const existing = await reg.pushManager.getSubscription();
+
+      if (existing) {
+        await existing.unsubscribe();
+        await fetch("/api/push/subscribe", { method: "DELETE" });
+        btn.textContent = "Enable";
+        btn.className = "btn btn-secondary";
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") return;
+
+      try {
+        const res = await fetch("/api/push/vapid-key");
+        const { publicKey } = await res.json();
+        if (!publicKey) { btn.textContent = "Not configured"; btn.disabled = true; return; }
+
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+
+        await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+
+        btn.textContent = "Disable";
+        btn.className = "btn btn-primary";
+      } catch { btn.textContent = "Error"; }
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(base64);
+      const arr = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    }
+
+    async function checkPushState() {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+        if (!reg) return;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          document.getElementById("push-toggle-btn").textContent = "Disable";
+          document.getElementById("push-toggle-btn").className = "btn btn-primary";
+        }
+      } catch {}
+    }
+
+    loadUser();
+    checkPushState();
+  </script>
+</body>
+</html>

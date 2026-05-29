@@ -27,13 +27,13 @@
       <li><a class="nav-link" href="/">Dashboard</a></li>
       <li><a class="nav-link active" href="/watchlist">Watchlist</a></li>
       <li><a class="nav-link" href="#">News</a></li>
-      <li><a class="nav-link" href="#">Settings</a></li>
+      <li><a class="nav-link" href="/settings">Settings</a></li>
     </ul>
     <div class="nav-actions">
       <button class="btn-icon" title="Notifications">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
       </button>
-      <div id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;" onclick="handleLogout()" title="Sign out">U</div>
+      <a href="/settings" id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;text-decoration:none;" title="Settings">U</a>
     </div>
   </nav>
 
@@ -74,13 +74,8 @@
         const user = await res.json();
         const avatar = document.getElementById("user-avatar");
         avatar.textContent = user.username.charAt(0).toUpperCase();
-        avatar.title = `Signed in as ${user.username} (click to sign out)`;
+        avatar.title = `Signed in as ${user.username}`;
       } catch { window.location.href = "/login"; }
-    }
-
-    async function handleLogout() {
-      await fetch("/api/logout", { method: "POST" });
-      window.location.href = "/login";
     }
 
     async function loadWatchlist() {
