@@ -156,19 +156,19 @@
           </div>
         </div>
 
-        <!-- News Card -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Latest News</h3>
-            <button class="card-menu-btn" onclick="loadNews()" title="Refresh news">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-            </button>
-          </div>
-          <div id="news-list" class="flex flex-col gap-3">
-            <p class="text-sm text-muted" style="text-align:center;padding:var(--space-4) 0;">Loading news...</p>
-          </div>
-        </div>
+      </div>
+    </div>
 
+    <!-- News Card (full width, below chart) -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <h3 class="card-title">Latest News</h3>
+        <button class="card-menu-btn" onclick="loadNews()" title="Refresh news">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </button>
+      </div>
+      <div id="news-list" class="news-grid">
+        <p class="text-sm text-muted" style="text-align:center;padding:var(--space-4) 0;grid-column:1/-1;">Loading news...</p>
       </div>
     </div>
   </main>
@@ -420,7 +420,7 @@
       c.textContent = "";
       const p = document.createElement("p");
       p.className = "text-sm text-muted";
-      p.style.cssText = "text-align:center;padding:var(--space-4) 0;";
+      p.style.cssText = "text-align:center;padding:var(--space-4) 0;grid-column:1/-1;";
       p.textContent = msg;
       c.appendChild(p);
     }
