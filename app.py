@@ -6,7 +6,7 @@ from cache import cached_fetch, invalidate
 from processor import build_heatmap, build_probability_heatmap
 from database import init_db, get_db
 from auth import create_user, authenticate, create_token, verify_token
-from news_scraper import scrape_news
+from news_scraper import scrape_news, scrape_twitter, scrape_all
 from sentiment import analyze_articles
 from notifications import VAPID_PUBLIC_KEY
 import sqlite3
@@ -226,7 +226,7 @@ def get_news(ticker: str, limit: int = Query(default=10, ge=1, le=50)):
         )
 
         if needs_fetch:
-            articles = scrape_news(ticker)
+            articles = scrape_all(ticker)
             articles = analyze_articles(articles)
             conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
             for a in articles:
