@@ -2,69 +2,243 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Options Heatmap</title>
-  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d1117; color: #e6edf3; font-family: monospace; padding: 24px; }
-    h1 { font-size: 1.2rem; margin-bottom: 16px; letter-spacing: 0.05em; color: #58a6ff; }
-    .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
-    input, select, button {
-      background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-      padding: 8px 12px; border-radius: 6px; font-family: monospace; font-size: 0.9rem;
-    }
-    button { cursor: pointer; background: #1f6feb; border-color: #1f6feb; }
-    button:hover { background: #388bfd; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-    .tab { cursor: pointer; padding: 6px 14px; border-radius: 4px; border: 1px solid #30363d; font-size: 0.85rem; }
-    .tab.active { background: #1f6feb; border-color: #1f6feb; }
-    #error { color: #f85149; margin-bottom: 12px; font-size: 0.85rem; display: none; }
-    #plot { width: 100%; height: 70vh; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heatmapper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" integrity="sha384-7TVmlZWH60iKX5Uk7lSvQhjtcgw2tkFjuwLcXoRSR4zXTyWFJRm9aPAguMh7CIra" crossorigin="anonymous"></script>
 </head>
 <body>
-  <h1>Options Heatmap</h1>
 
-  <div class="controls">
-    <input id="ticker" type="text" value="SPY" placeholder="Ticker" style="width:90px; text-transform:uppercase" />
-    <select id="metric" onchange="onMetricChange()">
-      <option value="probability">Price Probability</option>
-      <option value="openInterest">Open Interest</option>
-      <option value="volume">Volume</option>
-      <option value="impliedVolatility">Implied Volatility</option>
-    </select>
-    <input id="expirations" type="number" value="6" min="1" max="12" style="width:70px" title="Max expirations" />
-    <input id="band" type="number" value="5" min="0.5" max="100" step="0.5" style="width:80px" title="Price band width $ (probability mode — lower = zoom in)" />
-    <button onclick="load()">Load</button>
-  </div>
+  <!-- ===== Top Nav ===== -->
+  <nav class="top-nav">
+    <a href="/" class="nav-brand">
+      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="28" height="28" rx="6" fill="#1a1a1a"/>
+        <rect x="4" y="16" width="4" height="8" rx="1" fill="#e8913a"/>
+        <rect x="9.5" y="11" width="4" height="13" rx="1" fill="#e8913a" opacity="0.7"/>
+        <rect x="15" y="6" width="4" height="18" rx="1" fill="#e8913a" opacity="0.85"/>
+        <rect x="20.5" y="4" width="4" height="20" rx="1" fill="#e8913a"/>
+      </svg>
+      Heatmapper
+    </a>
 
-  <div class="tabs">
-    <div class="tab active" id="tab-calls" onclick="setView('calls')">Calls</div>
-    <div class="tab" id="tab-puts"  onclick="setView('puts')">Puts</div>
-    <div class="tab" id="tab-net"   onclick="setView('net')">Net</div>
-  </div>
+    <ul class="nav-links">
+      <li><a class="nav-link active" href="/">Dashboard</a></li>
+      <li><a class="nav-link" href="#">Watchlist</a></li>
+      <li><a class="nav-link" href="#">News</a></li>
+      <li><a class="nav-link" href="#">Settings</a></li>
+    </ul>
 
-  <div id="error"></div>
-  <div id="plot"></div>
+    <div class="nav-actions">
+      <button class="btn-icon" title="Search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
+      <button class="btn-icon" title="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <div id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;" onclick="handleLogout()" title="Sign out">U</div>
+    </div>
+  </nav>
+
+  <!-- ===== Main Content ===== -->
+  <main class="page-container">
+    <div class="page-header">
+      <h1 class="page-title">Dashboard</h1>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-secondary" id="last-updated"></span>
+      </div>
+    </div>
+
+    <!-- Ticker + Controls Card -->
+    <div class="card mb-4">
+      <div class="controls-bar">
+        <div class="input-group">
+          <label class="input-label" for="ticker">Ticker</label>
+          <input class="input-field font-mono" id="ticker" type="text" value="SPY" placeholder="e.g. SPY" style="width:100px; text-transform:uppercase" />
+        </div>
+
+        <div class="input-group">
+          <label class="input-label" for="metric">Metric</label>
+          <select class="input-field" id="metric" onchange="onMetricChange()">
+            <option value="probability">Price Probability</option>
+            <option value="openInterest">Open Interest</option>
+            <option value="volume">Volume</option>
+            <option value="impliedVolatility">Implied Volatility</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label class="input-label" for="expirations">Expirations</label>
+          <input class="input-field" id="expirations" type="number" value="6" min="1" max="12" style="width:70px" />
+        </div>
+
+        <div class="input-group" id="band-group">
+          <label class="input-label" for="band">Band Width ($)</label>
+          <input class="input-field" id="band" type="number" value="5" min="0.5" max="100" step="0.5" style="width:80px" />
+        </div>
+
+        <div class="input-group" style="justify-content:flex-end">
+          <label class="input-label">&nbsp;</label>
+          <button class="btn btn-primary" onclick="load()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Load
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard Grid -->
+    <div class="dashboard-grid dashboard-grid--two-col">
+
+      <!-- Heatmap Card -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title" id="chart-title">Options Heatmap</h2>
+            <p class="card-subtitle" id="chart-subtitle">SPY - Price Probability</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="tab-group" id="view-tabs">
+              <button class="tab-btn active" id="tab-calls" onclick="setView('calls')">Calls</button>
+              <button class="tab-btn" id="tab-puts" onclick="setView('puts')">Puts</button>
+              <button class="tab-btn" id="tab-net" onclick="setView('net')">Net</button>
+            </div>
+            <button class="card-menu-btn" onclick="refreshTicker()" title="Refresh data">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="error" class="error-msg"></div>
+        <div id="plot" class="plot-container"></div>
+      </div>
+
+      <!-- Right Sidebar -->
+      <div class="flex flex-col gap-6">
+
+        <!-- Spot Price Card -->
+        <div class="card" id="spot-card">
+          <div class="card-header">
+            <h3 class="card-title">Spot Price</h3>
+          </div>
+          <div class="stat-value font-mono" id="spot-price">--</div>
+          <p class="stat-label mt-2" id="spot-ticker">SPY</p>
+        </div>
+
+        <!-- Quick Stats Card -->
+        <div class="card" id="stats-card">
+          <div class="card-header">
+            <h3 class="card-title">Quick Stats</h3>
+          </div>
+          <div class="flex flex-col gap-4" id="stats-list">
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-secondary">Expirations Loaded</span>
+              <span class="font-semibold font-mono" id="stat-expirations">--</span>
+            </div>
+            <div class="divider"></div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-secondary">Strike Range</span>
+              <span class="font-semibold font-mono" id="stat-strike-range">--</span>
+            </div>
+            <div class="divider"></div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-secondary">Nearest Expiry</span>
+              <span class="font-semibold font-mono" id="stat-nearest-expiry">--</span>
+            </div>
+            <div class="divider"></div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-secondary">Metric</span>
+              <span class="badge badge--info" id="stat-metric">Probability</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- News Placeholder Card -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Latest News</h3>
+            <span class="badge badge--neutral">Coming Soon</span>
+          </div>
+          <p class="text-sm text-muted" style="padding:var(--space-8) 0;text-align:center;">
+            Sentiment-powered news feed will appear here.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </main>
 
   <script>
     let _data = null;
     let _view = "calls";
 
+    const METRIC_LABELS = {
+      probability:        "Price Probability",
+      openInterest:       "Open Interest",
+      volume:             "Volume",
+      impliedVolatility:  "Implied Volatility",
+    };
+
     const NET_LABELS = {
-      openInterest:      "Net OI (Calls − Puts)",
-      volume:            "Net Volume (Calls − Puts)",
-      impliedVolatility: "IV Skew (Call IV − Put IV)",
+      openInterest:      "Net OI (Calls - Puts)",
+      volume:            "Net Volume (Calls - Puts)",
+      impliedVolatility: "IV Skew (Call IV - Put IV)",
+    };
+
+    const PLOTLY_LAYOUT_BASE = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor:  "#fafafa",
+      font: { color: "#1a1a1a", family: "Inter, sans-serif", size: 12 },
+      xaxis: {
+        title: { text: "Expiration", font: { size: 12, color: "#6b6b6b" } },
+        type: "category",
+        tickangle: -30,
+        gridcolor: "#e5e5e5",
+        linecolor: "#e5e5e5",
+      },
+      yaxis: {
+        title: { text: "Strike", font: { size: 12, color: "#6b6b6b" } },
+        gridcolor: "#e5e5e5",
+        linecolor: "#e5e5e5",
+      },
+      margin: { t: 10, r: 100, b: 70, l: 65 },
     };
 
     function onMetricChange() {
       const metric = document.getElementById("metric").value;
       const isProb = metric === "probability";
-      // calls/puts/net tabs are meaningless for a single price distribution
-      document.querySelector(".tabs").style.display = isProb ? "none" : "flex";
+      document.getElementById("view-tabs").style.display = isProb ? "none" : "inline-flex";
+      document.getElementById("band-group").style.display = isProb ? "flex" : "none";
       document.getElementById("tab-net").textContent =
         metric === "impliedVolatility" ? "IV Skew" : "Net";
       if (_data) load();
+    }
+
+    function updateSidebar(data) {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      const metric = document.getElementById("metric").value;
+
+      document.getElementById("chart-subtitle").textContent =
+        `${ticker} - ${METRIC_LABELS[metric]}`;
+
+      if (data.spot_price != null) {
+        document.getElementById("spot-price").textContent = `$${data.spot_price.toFixed(2)}`;
+      } else {
+        document.getElementById("spot-price").textContent = "--";
+      }
+      document.getElementById("spot-ticker").textContent = ticker;
+
+      document.getElementById("stat-expirations").textContent = data.expirations.length;
+      const strikes = data.strikes;
+      document.getElementById("stat-strike-range").textContent =
+        `$${strikes[0].toFixed(0)} - $${strikes[strikes.length - 1].toFixed(0)}`;
+      document.getElementById("stat-nearest-expiry").textContent = data.expirations[0] || "--";
+      document.getElementById("stat-metric").textContent = METRIC_LABELS[metric];
+
+      document.getElementById("last-updated").textContent =
+        `Updated ${new Date().toLocaleTimeString()}`;
     }
 
     async function load() {
@@ -74,7 +248,7 @@
       const errEl  = document.getElementById("error");
       errEl.style.display = "none";
 
-      const band   = document.getElementById("band").value;
+      const band = document.getElementById("band").value;
       const url = metric === "probability"
         ? `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`
         : `/heatmap/${ticker}?metric=${metric}&max_expirations=${maxExp}`;
@@ -86,11 +260,18 @@
           throw new Error(body.detail || res.statusText);
         }
         _data = await res.json();
+        updateSidebar(_data);
         render();
       } catch (e) {
         errEl.textContent = e.message;
         errEl.style.display = "block";
       }
+    }
+
+    async function refreshTicker() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      await fetch(`/heatmap/${ticker}/refresh`, { method: "POST" });
+      load();
     }
 
     function setView(view) {
@@ -103,15 +284,18 @@
 
     function colorscaleFor(metric, view) {
       if (view === "net") {
-        return [["0","#f85149"], ["0.5","#161b22"], ["1","#3fb950"]];
+        return [
+          [0,   "#ef4444"],
+          [0.5, "#fafafa"],
+          [1,   "#22c55e"],
+        ];
       }
-      // blue (cold/low) → red (hot/high) for all single-side views
       return [
-        ["0",    "#1a237e"],
-        ["0.25", "#1976d2"],
-        ["0.5",  "#fbc02d"],
-        ["0.75", "#e53935"],
-        ["1",    "#b71c1c"],
+        [0,    "#eff6ff"],
+        [0.25, "#93c5fd"],
+        [0.5,  "#f59e0b"],
+        [0.75, "#ef4444"],
+        [1,    "#991b1b"],
       ];
     }
 
@@ -120,22 +304,18 @@
       return "%{z:,}";
     }
 
-    // blue (0%, default) -> red (high probability)
     const PROB_COLORSCALE = [
-      ["0",    "#0d1117"],
-      ["0.001","#1a237e"],
-      ["0.35", "#1976d2"],
-      ["0.6",  "#fbc02d"],
-      ["0.8",  "#e53935"],
-      ["1",    "#b71c1c"],
+      [0,     "#f5f5f7"],
+      [0.001, "#dbeafe"],
+      [0.35,  "#60a5fa"],
+      [0.6,   "#f59e0b"],
+      [0.8,   "#ef4444"],
+      [1,     "#991b1b"],
     ];
 
     function renderProbability() {
       const { strikes, expirations, probabilities, spot_price } = _data;
 
-      // Color each day relative to its own most-likely strike, otherwise a
-      // near-dated 0DTE spike (≈100% in one cell) saturates the scale and
-      // washes every other column to blue. True % is kept for the hover.
       const colMax = expirations.map((_, j) =>
         Math.max(...probabilities.map(row => row[j])) || 1
       );
@@ -155,10 +335,10 @@
           title: "Likelihood",
           tickvals: [0, 1],
           ticktext: ["Low", "High"],
-          tickfont: { color: "#e6edf3" },
-          titlefont: { color: "#e6edf3" },
+          tickfont: { color: "#6b6b6b" },
+          titlefont: { color: "#6b6b6b" },
         },
-        hovertemplate: "Price ≈ $%{y}<br>Expiry: %{x}<br>P ≈ %{customdata:.2f}%<extra></extra>",
+        hovertemplate: "Price ~ $%{y}<br>Expiry: %{x}<br>P ~ %{customdata:.2f}%<extra></extra>",
       }];
 
       if (spot_price != null) {
@@ -167,23 +347,21 @@
           mode: "lines+markers",
           x: expirations,
           y: Array(expirations.length).fill(spot_price),
-          line: { color: "#ffffff", width: 2, dash: "dot" },
-          marker: { size: 10, color: "#ffffff", symbol: "circle", line: { color: "#111", width: 1.5 } },
+          line: { color: "#1a1a1a", width: 2, dash: "dot" },
+          marker: { size: 8, color: "#1a1a1a", symbol: "circle", line: { color: "#fff", width: 1.5 } },
           name: `Spot $${spot_price.toFixed(2)}`,
           hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
         });
       }
 
-      Plotly.newPlot("plot", traces, {
-        paper_bgcolor: "#0d1117",
-        plot_bgcolor:  "#0d1117",
-        font: { color: "#e6edf3", family: "monospace" },
-        xaxis: { title: "Expiration", type: "category", tickangle: -30, gridcolor: "#21262d" },
-        yaxis: { title: "Price",      gridcolor: "#21262d" },
-        margin: { t: 20, r: 110, b: 80, l: 70 },
+      const layout = {
+        ...PLOTLY_LAYOUT_BASE,
+        yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: "Price", font: { size: 12, color: "#6b6b6b" } } },
         showlegend: spot_price != null,
-        legend: { x: 1.1, y: 1, font: { color: "#e6edf3" } },
-      }, { responsive: true });
+        legend: { x: 1.08, y: 1, font: { color: "#6b6b6b", size: 11 } },
+      };
+
+      Plotly.newPlot("plot", traces, layout, { responsive: true });
     }
 
     function render() {
@@ -207,7 +385,7 @@
         z,
         colorscale: colorscaleFor(metric, _view),
         hoverongaps: false,
-        colorbar: { title: label, tickfont: { color: "#e6edf3" }, titlefont: { color: "#e6edf3" } },
+        colorbar: { title: label, tickfont: { color: "#6b6b6b" }, titlefont: { color: "#6b6b6b" } },
         hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${formatHover(metric)}<extra></extra>`,
       }];
 
@@ -217,28 +395,41 @@
           mode: "lines+markers",
           x: expirations,
           y: Array(expirations.length).fill(spot_price),
-          line: { color: "#ffffff", width: 2, dash: "dot" },
-          marker: { size: 10, color: "#ffffff", symbol: "circle", line: { color: "#111", width: 1.5 } },
+          line: { color: "#1a1a1a", width: 2, dash: "dot" },
+          marker: { size: 8, color: "#1a1a1a", symbol: "circle", line: { color: "#fff", width: 1.5 } },
           name: `Spot $${spot_price.toFixed(2)}`,
           hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
         });
       }
 
-      Plotly.newPlot("plot", traces, {
-        paper_bgcolor: "#0d1117",
-        plot_bgcolor:  "#0d1117",
-        font: { color: "#e6edf3", family: "monospace" },
-        xaxis: { title: "Expiration", type: "category", tickangle: -30, gridcolor: "#21262d" },
-        yaxis: { title: "Strike",     gridcolor: "#21262d" },
-        margin: { t: 20, r: 100, b: 80, l: 70 },
+      const layout = {
+        ...PLOTLY_LAYOUT_BASE,
         showlegend: spot_price != null,
-        legend: { x: 1.08, y: 1, font: { color: "#e6edf3" } },
-      }, { responsive: true });
+        legend: { x: 1.08, y: 1, font: { color: "#6b6b6b", size: 11 } },
+      };
+
+      Plotly.newPlot("plot", traces, layout, { responsive: true });
     }
 
-    // sync tab visibility to the default metric, then load
-    document.querySelector(".tabs").style.display =
-      document.getElementById("metric").value === "probability" ? "none" : "flex";
+    async function loadUser() {
+      try {
+        const res = await fetch("/api/me");
+        if (!res.ok) { window.location.href = "/login"; return; }
+        const user = await res.json();
+        const avatar = document.getElementById("user-avatar");
+        avatar.textContent = user.username.charAt(0).toUpperCase();
+        avatar.title = `Signed in as ${user.username} (click to sign out)`;
+      } catch { window.location.href = "/login"; }
+    }
+
+    async function handleLogout() {
+      await fetch("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    }
+
+    // Init
+    loadUser();
+    onMetricChange();
     load();
   </script>
 </body>
