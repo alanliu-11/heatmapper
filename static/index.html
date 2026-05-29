@@ -318,7 +318,7 @@
     ];
 
     function renderProbability() {
-      const { strikes, expirations, probabilities, spot_price } = _data;
+      const { strikes, expirations, probabilities, spot_price, expected_prices } = _data;
 
       const colMax = expirations.map((_, j) =>
         Math.max(...probabilities.map(row => row[j])) || 1
@@ -358,10 +358,24 @@
         });
       }
 
+      if (expected_prices && expected_prices.length) {
+        traces.push({
+          type: "scatter",
+          mode: "lines+markers",
+          x: expirations,
+          y: expected_prices,
+          line: { color: "#2563eb", width: 2 },
+          marker: { size: 8, color: "#2563eb", symbol: "diamond", line: { color: "#fff", width: 1.5 } },
+          name: "Weighted avg prediction",
+          hovertemplate: "Predicted: $%{y:.2f}<br>Expiry: %{x}<extra></extra>",
+        });
+      }
+
+      const hasOverlay = spot_price != null || (expected_prices && expected_prices.length);
       const layout = {
         ...PLOTLY_LAYOUT_BASE,
         yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: "Price", font: { size: 12, color: "#6b6b6b" } } },
-        showlegend: spot_price != null,
+        showlegend: hasOverlay,
         legend: { x: 1.08, y: 1, font: { color: "#6b6b6b", size: 11 } },
       };
 

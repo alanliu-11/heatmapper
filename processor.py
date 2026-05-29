@@ -154,6 +154,7 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
     per_expiry.sort(key=lambda e: e[1])
     expirations: list[str] = []
     columns: list[list[float]] = []
+    expected_prices: list[float] = []   # probability-weighted price per expiry
 
     for label, t, ks, ivs in per_expiry:
         atm_sigma = float(np.interp(spot, ks, ivs))
@@ -171,8 +172,13 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
         total = sum(col)
         col = [100.0 * p / total for p in col] if total > 0 else [0.0] * len(strikes)
 
+        # Weighted-average predicted price: each band's midpoint price times its
+        # probability (col is in %, so divide by 100), summed over all bands.
+        expected = sum(strikes[i] * col[i] for i in range(len(strikes))) / 100.0
+
         expirations.append(label)
         columns.append(col)
+        expected_prices.append(round(expected, 2))
 
     probabilities = [
         [columns[j][i] for j in range(len(expirations))]
@@ -180,9 +186,10 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
     ]
 
     return {
-        "strikes":       strikes,
-        "expirations":   expirations,
-        "probabilities": probabilities,
-        "spot_price":    spot,
-        "metric":        "probability",
+        "strikes":         strikes,
+        "expirations":     expirations,
+        "probabilities":   probabilities,
+        "expected_prices": expected_prices,
+        "spot_price":      spot,
+        "metric":          "probability",
     }
