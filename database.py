@@ -45,6 +45,9 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_news_ticker ON news(ticker);
         CREATE INDEX IF NOT EXISTS idx_news_fetched ON news(fetched_at);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON watchlist(user_id);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist(ticker);
+        CREATE INDEX IF NOT EXISTS idx_push_user_id ON push_subscriptions(user_id);
 
         CREATE TABLE IF NOT EXISTS push_subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

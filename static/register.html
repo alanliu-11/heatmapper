@@ -155,9 +155,10 @@
 
   <script>
     async function handleRegister(e) {
-      e.preventDefault();
+      if (e) e.preventDefault();
       const errEl = document.getElementById("error");
       const btn = document.getElementById("submit-btn");
+      if (btn.disabled) return;
       errEl.style.display = "none";
 
       const password = document.getElementById("password").value;
@@ -195,6 +196,12 @@
         btn.textContent = "Create account";
       }
     }
+
+    document.getElementById("register-form").addEventListener("submit", handleRegister);
+    document.getElementById("submit-btn").addEventListener("click", function(e) {
+      e.preventDefault();
+      handleRegister();
+    });
   </script>
 </body>
 </html>

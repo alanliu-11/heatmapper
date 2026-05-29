@@ -144,9 +144,10 @@
 
   <script>
     async function handleLogin(e) {
-      e.preventDefault();
+      if (e) e.preventDefault();
       const errEl = document.getElementById("error");
       const btn = document.getElementById("submit-btn");
+      if (btn.disabled) return;
       errEl.style.display = "none";
       btn.disabled = true;
       btn.textContent = "Signing in...";
@@ -174,6 +175,12 @@
         btn.textContent = "Sign in";
       }
     }
+
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
+    document.getElementById("submit-btn").addEventListener("click", function(e) {
+      e.preventDefault();
+      handleLogin();
+    });
   </script>
 </body>
 </html>
