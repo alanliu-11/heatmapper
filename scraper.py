@@ -9,9 +9,9 @@ HEADERS = {
 }
 
 
-def _ensure_session():
+def _ensure_session(force: bool = False):
     global _session, _crumb
-    if _session is None:
+    if _session is None or _crumb is None or force:
         _session = requests.Session()
         _session.headers.update(HEADERS)
         _session.get("https://fc.yahoo.com", timeout=10)
@@ -21,14 +21,21 @@ def _ensure_session():
 
 
 def fetch_options_chain(ticker: str, expiry_timestamp: int = None) -> dict:
-    session, crumb = _ensure_session()
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker.upper()}"
-    params = {"crumb": crumb}
-    if expiry_timestamp:
-        params["date"] = expiry_timestamp
-    resp = session.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+
+    # Yahoo's crumb/cookie pair expires after a while. On an auth failure
+    # (401/403), re-establish the session once and retry so a long-running
+    # server self-heals without a restart.
+    for attempt in range(2):
+        session, crumb = _ensure_session(force=attempt > 0)
+        params = {"crumb": crumb}
+        if expiry_timestamp:
+            params["date"] = expiry_timestamp
+        resp = session.get(url, params=params, timeout=30)
+        if resp.status_code in (401, 403) and attempt == 0:
+            continue
+        resp.raise_for_status()
+        return resp.json()
 
 
 def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
