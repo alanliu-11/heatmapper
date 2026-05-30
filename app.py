@@ -3,12 +3,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
-from processor import build_heatmap, build_probability_heatmap, _parse_chain
+from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, _parse_chain
 from database import init_db, get_db
 from auth import create_user, authenticate, create_token, verify_token
 from news_scraper import scrape_news, scrape_twitter, scrape_reddit, scrape_all, scrape_company_info
 from sentiment import analyze_articles
 from notifications import VAPID_PUBLIC_KEY, send_push
+from typing import Literal
 import sqlite3
 import json
 import time as _time
@@ -198,10 +199,7 @@ def change_password(body: ChangePasswordRequest, request: Request):
 @app.get("/heatmap/{ticker}")
 def heatmap(
     ticker: str,
-    metric: str = Query(
-        default="openInterest",
-        enum=["openInterest", "volume", "impliedVolatility"],
-    ),
+    metric: Literal["openInterest", "volume", "impliedVolatility"] = "openInterest",
     max_expirations: int = Query(default=6, ge=1, le=12),
 ):
     try:
@@ -221,6 +219,19 @@ def probability(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_probability_heatmap(chains, near_pct=near_pct, band_width=band_width)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/exposure/{ticker}")
+def exposure(
+    ticker: str,
+    kind: Literal["gamma", "vanna"] = "gamma",
+    max_expirations: int = Query(default=6, ge=1, le=12),
+):
+    try:
+        chains = cached_fetch(ticker, max_expirations)
+        return build_exposure_heatmap(chains, kind=kind)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

@@ -78,6 +78,8 @@
             <option value="openInterest">Open Interest</option>
             <option value="volume">Volume</option>
             <option value="impliedVolatility">Implied Volatility</option>
+            <option value="gex">Gamma Exposure (GEX)</option>
+            <option value="vex">Vanna Exposure (VEX)</option>
           </select>
         </div>
 
@@ -308,13 +310,19 @@
       openInterest:       "Open Interest",
       volume:             "Volume",
       impliedVolatility:  "Implied Volatility",
+      gex:                "Gamma Exposure",
+      vex:                "Vanna Exposure",
     };
 
     const NET_LABELS = {
       openInterest:      "Net OI (Calls - Puts)",
       volume:            "Net Volume (Calls - Puts)",
       impliedVolatility: "IV Skew (Call IV - Put IV)",
+      gex:               "Net GEX (Dealer)",
+      vex:               "Net VEX (Dealer)",
     };
+
+    const EXPOSURE_METRICS = { gex: "gamma", vex: "vanna" };
 
     const PLOTLY_CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
 
@@ -347,6 +355,8 @@
       document.getElementById("band-group").style.display = isProb ? "flex" : "none";
       document.getElementById("tab-net").textContent =
         metric === "impliedVolatility" ? "IV Skew" : "Net";
+      // Dealer exposure is read on the net book by default.
+      if (EXPOSURE_METRICS[metric]) setView("net");
       if (_data) load();
     }
 
@@ -398,9 +408,14 @@
       hideEl("plot");
 
       const band = document.getElementById("band").value;
-      const url = metric === "probability"
-        ? `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`
-        : `/heatmap/${ticker}?metric=${metric}&max_expirations=${maxExp}`;
+      let url;
+      if (metric === "probability") {
+        url = `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`;
+      } else if (EXPOSURE_METRICS[metric]) {
+        url = `/exposure/${ticker}?kind=${EXPOSURE_METRICS[metric]}&max_expirations=${maxExp}`;
+      } else {
+        url = `/heatmap/${ticker}?metric=${metric}&max_expirations=${maxExp}`;
+      }
 
       try {
         const res = await fetch(url);
@@ -449,6 +464,7 @@
 
     function formatHover(metric) {
       if (metric === "impliedVolatility") return "%{z:.1%}";
+      if (metric === "gex" || metric === "vex") return "$%{z:,.0f}";
       return "%{z:,}";
     }
 
@@ -527,6 +543,7 @@
       const traces = [{
         type: "heatmap", x: expirations, y: strikes, z,
         colorscale: colorscaleFor(metric, _view), hoverongaps: false,
+        ...(_view === "net" ? { zmid: 0 } : {}),
         colorbar: { title: label, tickfont: { color: t.secondaryColor }, titlefont: { color: t.secondaryColor } },
         hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${formatHover(metric)}<extra></extra>`,
       }];
