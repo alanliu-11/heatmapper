@@ -1,106 +1,103 @@
 # Heatmapper
 
-A web app that visualizes stock options data as interactive heatmaps with sentiment-powered news tracking, watchlists, and push notifications.
+Options intelligence platform that overlays real-time sentiment analysis on top of options flow data. Detects divergences between market positioning and crowd narrative.
 
-Built with FastAPI + Plotly.js + SQLite. Data sourced from Yahoo Finance. News via Bright Data SERP API.
+Built with FastAPI + Plotly.js + SQLite. Powered by **Bright Data** (SERP API + Web Unlocker API) and **FinBERT** financial NLP.
 
 ## Features
 
 - **Options heatmaps** (Open Interest, Volume, IV, Price Probability) with calls/puts/net views
-- **News scraping + sentiment analysis** using VADER on Google News headlines per ticker
-- **Watchlist** with per-stock sentiment summaries persisted across sessions
-- **Push notifications** (Web Push API) for watched stocks when negative sentiment news hits
-- **Weekly email digest** summarizing watchlist sentiment
+- **FinBERT sentiment analysis** from News, Twitter, and Reddit via Bright Data SERP API
+- **Sentiment-Options divergence detection** with real-time alerts when sentiment contradicts options positioning
+- **Company data** (market cap, P/E, EPS, beta, 52-week range) via Bright Data Web Unlocker API
+- **Per-ticker sentiment breakdown** with per-source scores and visual gauges
+- **Watchlist** with divergence scanning and push notifications
+- **Push notifications** (Web Push API) for divergence alerts, with background scanner every 15 min
+- **Dark mode** with system preference detection and localStorage persistence
+- **Skeleton loading states** for all data sections
 - **Auth system** with username/password login, JWT sessions
-- **Design system** with CSS tokens, card-based dashboard, responsive layout
+- **Landing page** with feature overview for demo/hackathon presentation
+
+## Bright Data Integration
+
+Two Bright Data products are used:
+
+1. **SERP API** (`serp_api1` zone) - Scrapes Google News, Twitter/X, and Reddit for financial sentiment data
+2. **Web Unlocker API** (`web_unlocker1` zone) - Scrapes stockanalysis.com for structured company fundamentals (market cap, P/E, EPS, beta, etc.)
 
 ## Quickstart
 
 ```bash
 cp .env.example .env
-# Fill in API keys (optional for dev -- placeholders work without them)
+# Fill in API keys
 pip install -r requirements.txt
 uvicorn app:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Create an account, add tickers to your watchlist, and view sentiment-tagged news.
+Open [http://localhost:8000](http://localhost:8000).
 
 ## API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/register` | Create account (username, password) |
+| `POST` | `/api/register` | Create account |
 | `POST` | `/api/login` | Sign in, returns JWT cookie |
-| `POST` | `/api/logout` | Sign out, clears cookie |
-| `GET` | `/api/me` | Current authenticated user |
-| `GET` | `/heatmap/{ticker}` | Heatmap data (openInterest, volume, impliedVolatility) |
+| `POST` | `/api/logout` | Sign out |
+| `GET` | `/api/me` | Current user |
+| `GET` | `/heatmap/{ticker}` | Options heatmap data |
 | `GET` | `/probability/{ticker}` | Price probability distribution |
-| `POST` | `/heatmap/{ticker}/refresh` | Invalidate cache for ticker |
-| `GET` | `/api/news/{ticker}` | News articles with sentiment scores (cached 15 min) |
+| `POST` | `/heatmap/{ticker}/refresh` | Invalidate cache |
+| `GET` | `/api/news/{ticker}` | News + sentiment scores |
+| `GET` | `/api/company/{ticker}` | Company fundamentals (via Web Unlocker) |
+| `GET` | `/api/divergence/{ticker}` | Sentiment-options divergence analysis |
+| `POST` | `/api/scan` | Scan watchlist for divergences + send push alerts |
+| `GET` | `/api/sentiment-heatmap` | Multi-ticker sentiment grid |
 | `GET` | `/api/watchlist` | User's watchlist |
-| `POST` | `/api/watchlist` | Add ticker to watchlist |
-| `DELETE` | `/api/watchlist/{ticker}` | Remove ticker from watchlist |
-| `GET` | `/api/watchlist/summary` | Watchlist with avg sentiment per ticker |
-| `GET` | `/api/push/vapid-key` | VAPID public key for push subscription |
+| `POST` | `/api/watchlist` | Add ticker |
+| `DELETE` | `/api/watchlist/{ticker}` | Remove ticker |
+| `GET` | `/api/watchlist/summary` | Watchlist sentiment summary |
+| `GET` | `/api/push/vapid-key` | VAPID public key |
 | `POST` | `/api/push/subscribe` | Register push subscription |
-| `DELETE` | `/api/push/subscribe` | Unsubscribe from push notifications |
+| `DELETE` | `/api/push/subscribe` | Unsubscribe |
 
 ## Project Structure
 
 ```
-app.py              FastAPI routes and server
-auth.py             JWT auth (PBKDF2-SHA256), token create/verify
-database.py         SQLite schema (users, watchlist, news, push_subscriptions)
+app.py              FastAPI routes, divergence scanner, background scheduler
+auth.py             JWT auth (PBKDF2-SHA256)
+database.py         SQLite schema (users, watchlist, news, company_data, push_subscriptions)
 scraper.py          Yahoo Finance options chain fetcher
 processor.py        Heatmap and probability distribution builders
 cache.py            In-memory TTL cache (15 min)
-news_scraper.py     Bright Data SERP API (placeholder fallback when no API key)
-sentiment.py        VADER sentiment analysis on headlines
-notifications.py    Web Push notification sender (pywebpush)
-email_digest.py     Weekly email TLDR (run via cron)
+news_scraper.py     Bright Data SERP API + Web Unlocker API
+sentiment.py        FinBERT sentiment analysis (ProsusAI/finbert)
+notifications.py    Web Push notification sender
+email_digest.py     Weekly email TLDR
 static/
-  index.html        Dashboard (heatmap + news sidebar + controls)
-  login.html        Login page
-  register.html     Registration page
-  watchlist.html    Watchlist management (3-column card grid)
-  styles.css        Design system (CSS custom properties, components)
+  index.html        Dashboard (heatmaps, sentiment, divergence, news)
+  login.html        Landing page + login
+  register.html     Registration
+  watchlist.html    Watchlist with divergence scanning
+  settings.html     Account settings
+  styles.css        Design system (light/dark themes, skeletons, components)
   sw.js             Service worker for push notifications
 ```
 
 ## Environment Variables
 
-See `.env.example` for all available config:
-
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SECRET_KEY` | For production | JWT signing key (falls back to dev default) |
-| `BRIGHTDATA_API_TOKEN` | No | Enables real news scraping (placeholder data without it) |
-| `VAPID_PRIVATE_KEY` | No | Enables Web Push notifications |
-| `VAPID_PUBLIC_KEY` | No | Public key for push subscription |
-| `SMTP_HOST` | No | Enables weekly email digest |
-| `SMTP_PORT` | No | SMTP port (default 587) |
-| `SMTP_USER` | No | SMTP username |
-| `SMTP_PASS` | No | SMTP password |
-| `FROM_EMAIL` | No | Sender email for digest |
-
-## Weekly Email Digest
-
-```bash
-# Run manually
-python email_digest.py
-
-# Or schedule via cron (every Sunday at 9am)
-# 0 9 * * 0 cd /path/to/heatmapper && python email_digest.py
-```
-
-Requires SMTP credentials in `.env` and an email address on the user account.
+| `BRIGHTDATA_API_TOKEN` | Yes | Bright Data API token (SERP + Web Unlocker) |
+| `SECRET_KEY` | For production | JWT signing key |
+| `VAPID_PRIVATE_KEY` | For push | Web Push private key |
+| `VAPID_PUBLIC_KEY` | For push | Web Push public key |
+| `SMTP_HOST` | No | Email digest SMTP host |
 
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, SQLite
 - **Frontend:** Vanilla HTML/CSS/JS, Plotly.js
-- **Auth:** JWT (PyJWT), PBKDF2-SHA256 password hashing
-- **Sentiment:** VADER (vaderSentiment)
-- **News:** Bright Data SERP API
+- **Sentiment:** FinBERT (ProsusAI/finbert via HuggingFace Transformers)
+- **Data:** Bright Data SERP API + Web Unlocker API, Yahoo Finance (yfinance)
+- **Auth:** JWT (PyJWT), PBKDF2-SHA256
 - **Notifications:** Web Push API (pywebpush)
-- **Email:** SMTP (stdlib smtplib)

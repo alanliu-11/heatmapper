@@ -10,6 +10,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" integrity="sha384-7TVmlZWH60iKX5Uk7lSvQhjtcgw2tkFjuwLcXoRSR4zXTyWFJRm9aPAguMh7CIra" crossorigin="anonymous"></script>
+  <script>
+    const saved = localStorage.getItem("theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    else if (window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.setAttribute("data-theme", "dark");
+  </script>
 </head>
 <body>
 
@@ -29,39 +34,44 @@
     <ul class="nav-links">
       <li><a class="nav-link active" href="/">Dashboard</a></li>
       <li><a class="nav-link" href="/watchlist">Watchlist</a></li>
-      <li><a class="nav-link" href="/news">News</a></li>
       <li><a class="nav-link" href="/settings">Settings</a></li>
     </ul>
 
     <div class="nav-actions">
-      <button class="btn-icon" title="Search">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme">
+        <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
       </button>
-      <button class="btn-icon" title="Notifications">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <button class="btn-icon" title="Scan watchlist for divergences" id="scan-btn" onclick="scanWatchlist()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
-      <a href="/settings" id="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:var(--text-sm);cursor:pointer;text-decoration:none;" title="Settings">U</a>
+      <button class="btn-icon" title="Enable notifications" id="notif-btn">
+        <svg id="notif-icon-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23" stroke-width="2"/></svg>
+        <svg id="notif-icon-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;color:var(--color-accent-green)"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <a href="/settings" id="user-avatar" class="user-avatar" title="Settings">U</a>
     </div>
   </nav>
 
   <!-- ===== Main Content ===== -->
   <main class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">Dashboard</h1>
-      <div class="flex items-center gap-3">
-        <span class="text-sm text-secondary" id="last-updated"></span>
-      </div>
-    </div>
 
-    <!-- Ticker + Controls Card -->
-    <div class="card mb-4">
+    <!-- Controls + Spot Price Bar -->
+    <div class="card toolbar-card mb-4">
       <div class="controls-bar">
-        <div class="input-group">
+        <div class="input-group--inline">
           <label class="input-label" for="ticker">Ticker</label>
-          <input class="input-field font-mono" id="ticker" type="text" value="SPY" placeholder="e.g. SPY" style="width:100px; text-transform:uppercase" />
+          <input class="input-field font-mono" id="ticker" type="text" value="SPY" placeholder="SPY" style="width:80px; text-transform:uppercase" />
         </div>
 
-        <div class="input-group">
+        <div class="spot-display" id="spot-display">
+          <span class="spot-price font-mono" id="spot-price">--</span>
+          <span class="spot-change" id="spot-change"></span>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="input-group--inline">
           <label class="input-label" for="metric">Metric</label>
           <select class="input-field" id="metric" onchange="onMetricChange()">
             <option value="probability">Price Probability</option>
@@ -71,111 +81,227 @@
           </select>
         </div>
 
-        <div class="input-group">
-          <label class="input-label" for="expirations">Expirations</label>
-          <input class="input-field" id="expirations" type="number" value="6" min="1" max="12" style="width:70px" />
+        <div class="input-group--inline">
+          <label class="input-label" for="expirations">Exp</label>
+          <input class="input-field" id="expirations" type="number" value="6" min="1" max="12" style="width:55px" />
         </div>
 
-        <div class="input-group" id="band-group">
-          <label class="input-label" for="band">Band Width ($)</label>
-          <input class="input-field" id="band" type="number" value="5" min="0.5" max="100" step="0.5" style="width:80px" />
+        <div class="input-group--inline" id="band-group">
+          <label class="input-label" for="band">Band $</label>
+          <input class="input-field" id="band" type="number" value="5" min="0.5" max="100" step="0.5" style="width:65px" />
         </div>
 
-        <div class="input-group" style="justify-content:flex-end">
-          <label class="input-label">&nbsp;</label>
-          <button class="btn btn-primary" onclick="load()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            Load
-          </button>
+        <button class="btn btn-primary" onclick="load()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          Load
+        </button>
+
+        <div class="tab-group" id="view-tabs" style="margin-left:auto">
+          <button class="tab-btn active" id="tab-calls" onclick="setView('calls')">Calls</button>
+          <button class="tab-btn" id="tab-puts" onclick="setView('puts')">Puts</button>
+          <button class="tab-btn" id="tab-net" onclick="setView('net')">Net</button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+        <span class="text-xs text-muted" id="last-updated"></span>
+      </div>
+    </div>
+
+    <!-- Options Stats Strip -->
+    <div class="stats-strip" id="stats-strip">
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Expirations</span>
+        <span class="font-semibold font-mono" id="stat-expirations">--</span>
+      </div>
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Strike Range</span>
+        <span class="font-semibold font-mono" id="stat-strike-range">--</span>
+      </div>
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Nearest Expiry</span>
+        <span class="font-semibold font-mono" id="stat-nearest-expiry">--</span>
+      </div>
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Metric</span>
+        <span class="badge badge--info" id="stat-metric">Probability</span>
+      </div>
+    </div>
+
+    <!-- Company Stats Strip -->
+    <div class="stats-strip mb-4" id="company-strip" style="display:none;">
+      <div class="stats-strip-item" id="company-mcap">
+        <span class="text-xs text-muted uppercase tracking-wide">Mkt Cap</span>
+        <span class="font-semibold font-mono" id="stat-mcap">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-pe">
+        <span class="text-xs text-muted uppercase tracking-wide">P/E</span>
+        <span class="font-semibold font-mono" id="stat-pe">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-eps">
+        <span class="text-xs text-muted uppercase tracking-wide">EPS</span>
+        <span class="font-semibold font-mono" id="stat-eps">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-beta">
+        <span class="text-xs text-muted uppercase tracking-wide">Beta</span>
+        <span class="font-semibold font-mono" id="stat-beta">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-52w">
+        <span class="text-xs text-muted uppercase tracking-wide">52W Range</span>
+        <span class="font-semibold font-mono" id="stat-52w">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-vol">
+        <span class="text-xs text-muted uppercase tracking-wide">Avg Vol</span>
+        <span class="font-semibold font-mono" id="stat-vol">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-earnings">
+        <span class="text-xs text-muted uppercase tracking-wide">Earnings</span>
+        <span class="font-semibold font-mono" id="stat-earnings">--</span>
+      </div>
+      <div class="stats-strip-item" id="company-rec">
+        <span class="text-xs text-muted uppercase tracking-wide">Price Target</span>
+        <span class="font-semibold font-mono" id="stat-rec">--</span>
+      </div>
+    </div>
+
+    <!-- Divergence Alert Banner -->
+    <div class="divergence-banner" id="divergence-banner" style="display:none;">
+      <div class="divergence-icon" id="divergence-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <div class="divergence-content">
+        <div class="divergence-title" id="divergence-title"></div>
+        <div class="divergence-detail" id="divergence-detail"></div>
+      </div>
+      <div class="divergence-metrics">
+        <div class="divergence-metric">
+          <span class="text-xs text-muted uppercase tracking-wide">P/C Ratio</span>
+          <span class="font-semibold font-mono" id="div-pcr">--</span>
+        </div>
+        <div class="divergence-metric">
+          <span class="text-xs text-muted uppercase tracking-wide">Sentiment</span>
+          <span class="font-semibold font-mono" id="div-sentiment">--</span>
         </div>
       </div>
     </div>
 
-    <!-- Dashboard Grid -->
+    <!-- Heatmaps + News Sidebar -->
     <div class="dashboard-grid dashboard-grid--two-col">
 
-      <!-- Heatmap Card -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title" id="chart-title">Options Heatmap</h2>
-            <p class="card-subtitle" id="chart-subtitle">SPY - Price Probability</p>
-          </div>
-          <div class="flex items-center gap-3">
-            <div class="tab-group" id="view-tabs">
-              <button class="tab-btn active" id="tab-calls" onclick="setView('calls')">Calls</button>
-              <button class="tab-btn" id="tab-puts" onclick="setView('puts')">Puts</button>
-              <button class="tab-btn" id="tab-net" onclick="setView('net')">Net</button>
+      <!-- Left: Heatmaps stacked -->
+      <div class="flex flex-col gap-6">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title" id="chart-title">Options Heatmap</h2>
+              <p class="card-subtitle" id="chart-subtitle">SPY - Price Probability</p>
             </div>
-            <button class="card-menu-btn" onclick="refreshTicker()" title="Refresh data">
+          </div>
+          <div id="error" class="error-msg"></div>
+          <div id="plot-skeleton" class="skeleton skeleton-block" style="height:55vh;min-height:350px;"></div>
+          <div id="plot" class="plot-container" style="display:none;"></div>
+        </div>
+
+        <div class="card" id="sentiment-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Sentiment Analysis</h2>
+              <p class="card-subtitle" id="sentiment-subtitle">Sentiment from News, Twitter, and Reddit</p>
+            </div>
+          </div>
+
+          <div id="sentiment-skeleton" class="flex flex-col gap-4">
+            <div class="skeleton skeleton-text" style="width:40%"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:20px;"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:20px;"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:20px;"></div>
+          </div>
+
+          <div id="sentiment-content" style="display:none;">
+            <!-- Overall score -->
+            <div class="sentiment-overall">
+              <div class="sentiment-score-big" id="sent-overall-score">0.00</div>
+              <div class="sentiment-label-big" id="sent-overall-label">Neutral</div>
+              <div class="sentiment-bar-track">
+                <div class="sentiment-bar-fill" id="sent-overall-bar"></div>
+                <div class="sentiment-bar-marker" id="sent-overall-marker"></div>
+              </div>
+              <div class="flex justify-between text-xs text-muted" style="margin-top:var(--space-1);">
+                <span>Bearish</span>
+                <span>Neutral</span>
+                <span>Bullish</span>
+              </div>
+            </div>
+
+            <!-- Per-source breakdown -->
+            <div class="sentiment-sources" id="sentiment-sources"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: News sidebar (sticky) -->
+      <div class="sidebar-sticky">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Latest News</h3>
+            <button class="card-menu-btn" onclick="loadNews()" title="Refresh news">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
             </button>
           </div>
-        </div>
-        <div id="error" class="error-msg"></div>
-        <div id="plot" class="plot-container"></div>
-      </div>
-
-      <!-- Right Sidebar -->
-      <div class="flex flex-col gap-6">
-
-        <!-- Spot Price Card -->
-        <div class="card" id="spot-card">
-          <div class="card-header">
-            <h3 class="card-title">Spot Price</h3>
+          <div id="news-skeleton" class="flex flex-col gap-3">
+            <div class="skeleton-news-item"><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text-sm"></div></div>
+            <div class="skeleton-news-item"><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text-sm"></div></div>
+            <div class="skeleton-news-item"><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text-sm"></div></div>
+            <div class="skeleton-news-item"><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text-sm"></div></div>
           </div>
-          <div class="stat-value font-mono" id="spot-price">--</div>
-          <p class="stat-label mt-2" id="spot-ticker">SPY</p>
+          <div id="news-list" class="news-list-compact" style="display:none;"></div>
         </div>
-
-        <!-- Quick Stats Card -->
-        <div class="card" id="stats-card">
-          <div class="card-header">
-            <h3 class="card-title">Quick Stats</h3>
-          </div>
-          <div class="flex flex-col gap-4" id="stats-list">
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-secondary">Expirations Loaded</span>
-              <span class="font-semibold font-mono" id="stat-expirations">--</span>
-            </div>
-            <div class="divider"></div>
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-secondary">Strike Range</span>
-              <span class="font-semibold font-mono" id="stat-strike-range">--</span>
-            </div>
-            <div class="divider"></div>
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-secondary">Nearest Expiry</span>
-              <span class="font-semibold font-mono" id="stat-nearest-expiry">--</span>
-            </div>
-            <div class="divider"></div>
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-secondary">Metric</span>
-              <span class="badge badge--info" id="stat-metric">Probability</span>
-            </div>
-          </div>
-        </div>
-
       </div>
     </div>
 
-    <!-- News Card (full width, below chart) -->
-    <div class="card mt-4">
-      <div class="card-header">
-        <h3 class="card-title">Latest News</h3>
-        <button class="card-menu-btn" onclick="loadNews()" title="Refresh news">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-        </button>
-      </div>
-      <div id="news-list" class="news-grid">
-        <p class="text-sm text-muted" style="text-align:center;padding:var(--space-4) 0;grid-column:1/-1;">Loading news...</p>
-      </div>
+    <!-- Toast -->
+    <div class="toast" id="toast" style="display:none;">
+      <span id="toast-msg"></span>
     </div>
   </main>
 
   <script>
     let _data = null;
     let _view = "calls";
+
+    // --- Theme ---
+    function updateThemeIcon() {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      document.getElementById("theme-icon-light").style.display = isDark ? "none" : "block";
+      document.getElementById("theme-icon-dark").style.display = isDark ? "block" : "none";
+    }
+    updateThemeIcon();
+
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      const next = isDark ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("theme", next);
+      updateThemeIcon();
+      if (_data) render();
+    });
+
+    function getPlotlyTheme() {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      return {
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        font: { color: isDark ? "#e5e5e5" : "#1a1a1a", family: "Inter, sans-serif", size: 12 },
+        gridcolor: isDark ? "#2e2e2e" : "#e5e5e5",
+        linecolor: isDark ? "#2e2e2e" : "#e5e5e5",
+        secondaryColor: isDark ? "#999999" : "#6b6b6b",
+      };
+    }
+
+    // --- Skeleton helpers ---
+    function showSkeleton(id) { const el = document.getElementById(id); if (el) el.style.display = ""; }
+    function hideSkeleton(id) { const el = document.getElementById(id); if (el) el.style.display = "none"; }
+    function showEl(id) { const el = document.getElementById(id); if (el) el.style.display = ""; }
+    function hideEl(id) { const el = document.getElementById(id); if (el) el.style.display = "none"; }
 
     const METRIC_LABELS = {
       probability:        "Price Probability",
@@ -190,24 +316,29 @@
       impliedVolatility: "IV Skew (Call IV - Put IV)",
     };
 
-    const PLOTLY_LAYOUT_BASE = {
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor:  "#fafafa",
-      font: { color: "#1a1a1a", family: "Inter, sans-serif", size: 12 },
-      xaxis: {
-        title: { text: "Expiration", font: { size: 12, color: "#6b6b6b" } },
-        type: "category",
-        tickangle: -30,
-        gridcolor: "#e5e5e5",
-        linecolor: "#e5e5e5",
-      },
-      yaxis: {
-        title: { text: "Strike", font: { size: 12, color: "#6b6b6b" } },
-        gridcolor: "#e5e5e5",
-        linecolor: "#e5e5e5",
-      },
-      margin: { t: 10, r: 100, b: 70, l: 65 },
-    };
+    const PLOTLY_CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
+
+    function getLayoutBase() {
+      const t = getPlotlyTheme();
+      return {
+        paper_bgcolor: t.paper_bgcolor,
+        plot_bgcolor:  t.plot_bgcolor,
+        font: t.font,
+        xaxis: {
+          title: { text: "Expiration", font: { size: 12, color: t.secondaryColor } },
+          type: "category",
+          tickangle: -30,
+          gridcolor: t.gridcolor,
+          linecolor: t.linecolor,
+        },
+        yaxis: {
+          title: { text: "Strike", font: { size: 12, color: t.secondaryColor } },
+          gridcolor: t.gridcolor,
+          linecolor: t.linecolor,
+        },
+        margin: { t: 10, r: 100, b: 70, l: 65 },
+      };
+    }
 
     function onMetricChange() {
       const metric = document.getElementById("metric").value;
@@ -219,19 +350,31 @@
       if (_data) load();
     }
 
+    let _prevPrice = null;
+
     function updateSidebar(data) {
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
       const metric = document.getElementById("metric").value;
 
-      document.getElementById("chart-subtitle").textContent =
-        `${ticker} - ${METRIC_LABELS[metric]}`;
+      document.getElementById("chart-subtitle").textContent = `${ticker} - ${METRIC_LABELS[metric]}`;
+
+      const priceEl = document.getElementById("spot-price");
+      const changeEl = document.getElementById("spot-change");
 
       if (data.spot_price != null) {
-        document.getElementById("spot-price").textContent = `$${data.spot_price.toFixed(2)}`;
+        priceEl.textContent = `$${data.spot_price.toFixed(2)}`;
+
+        if (_prevPrice != null && _prevPrice !== data.spot_price) {
+          const diff = data.spot_price - _prevPrice;
+          const pct = ((diff / _prevPrice) * 100).toFixed(2);
+          const isUp = diff >= 0;
+          changeEl.className = `spot-change ${isUp ? 'spot-change--up' : 'spot-change--down'}`;
+          changeEl.textContent = `${isUp ? '+' : ''}${pct}%`;
+        }
+        _prevPrice = data.spot_price;
       } else {
-        document.getElementById("spot-price").textContent = "--";
+        priceEl.textContent = "--";
       }
-      document.getElementById("spot-ticker").textContent = ticker;
 
       document.getElementById("stat-expirations").textContent = data.expirations.length;
       const strikes = data.strikes;
@@ -251,6 +394,9 @@
       const errEl  = document.getElementById("error");
       errEl.style.display = "none";
 
+      showSkeleton("plot-skeleton");
+      hideEl("plot");
+
       const band = document.getElementById("band").value;
       const url = metric === "probability"
         ? `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`
@@ -263,10 +409,18 @@
           throw new Error(body.detail || res.statusText);
         }
         _data = await res.json();
+
+        hideSkeleton("plot-skeleton");
+        showEl("plot");
+
         updateSidebar(_data);
         render();
         loadNews();
+        loadDivergence();
+        loadCompanyInfo();
+        loadSentimentBreakdown();
       } catch (e) {
+        hideSkeleton("plot-skeleton");
         errEl.textContent = e.message;
         errEl.style.display = "block";
       }
@@ -288,19 +442,9 @@
 
     function colorscaleFor(metric, view) {
       if (view === "net") {
-        return [
-          [0,   "#ef4444"],
-          [0.5, "#fafafa"],
-          [1,   "#22c55e"],
-        ];
+        return [[0, "#ef4444"], [0.5, getPlotlyTheme().plot_bgcolor], [1, "#22c55e"]];
       }
-      return [
-        [0,    "#eff6ff"],
-        [0.25, "#93c5fd"],
-        [0.5,  "#f59e0b"],
-        [0.75, "#ef4444"],
-        [1,    "#991b1b"],
-      ];
+      return [[0, "#eff6ff"], [0.25, "#93c5fd"], [0.5, "#f59e0b"], [0.75, "#ef4444"], [1, "#991b1b"]];
     }
 
     function formatHover(metric) {
@@ -309,16 +453,13 @@
     }
 
     const PROB_COLORSCALE = [
-      [0,     "#f5f5f7"],
-      [0.001, "#dbeafe"],
-      [0.35,  "#60a5fa"],
-      [0.6,   "#f59e0b"],
-      [0.8,   "#ef4444"],
-      [1,     "#991b1b"],
+      [0,     "#f5f5f7"], [0.001, "#dbeafe"], [0.35, "#60a5fa"],
+      [0.6,   "#f59e0b"], [0.8,   "#ef4444"], [1,    "#991b1b"],
     ];
 
     function renderProbability() {
       const { strikes, expirations, probabilities, spot_price, expected_prices } = _data;
+      const t = getPlotlyTheme();
 
       const colMax = expirations.map((_, j) =>
         Math.max(...probabilities.map(row => row[j])) || 1
@@ -326,33 +467,22 @@
       const zColor = probabilities.map(row => row.map((v, j) => v / colMax[j]));
 
       const traces = [{
-        type: "heatmap",
-        x: expirations,
-        y: strikes,
-        z: zColor,
-        customdata: probabilities,
-        zmin: 0,
-        zmax: 1,
-        colorscale: PROB_COLORSCALE,
-        hoverongaps: false,
+        type: "heatmap", x: expirations, y: strikes, z: zColor,
+        customdata: probabilities, zmin: 0, zmax: 1,
+        colorscale: PROB_COLORSCALE, hoverongaps: false,
         colorbar: {
-          title: "Likelihood",
-          tickvals: [0, 1],
-          ticktext: ["Low", "High"],
-          tickfont: { color: "#6b6b6b" },
-          titlefont: { color: "#6b6b6b" },
+          title: "Likelihood", tickvals: [0, 1], ticktext: ["Low", "High"],
+          tickfont: { color: t.secondaryColor }, titlefont: { color: t.secondaryColor },
         },
         hovertemplate: "Price ~ $%{y}<br>Expiry: %{x}<br>P ~ %{customdata:.2f}%<extra></extra>",
       }];
 
       if (spot_price != null) {
         traces.push({
-          type: "scatter",
-          mode: "lines+markers",
-          x: expirations,
+          type: "scatter", mode: "lines+markers", x: expirations,
           y: Array(expirations.length).fill(spot_price),
-          line: { color: "#1a1a1a", width: 2, dash: "dot" },
-          marker: { size: 8, color: "#1a1a1a", symbol: "circle", line: { color: "#fff", width: 1.5 } },
+          line: { color: t.font.color, width: 2, dash: "dot" },
+          marker: { size: 8, color: t.font.color, symbol: "circle", line: { color: t.plot_bgcolor, width: 1.5 } },
           name: `Spot $${spot_price.toFixed(2)}`,
           hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
         });
@@ -360,12 +490,9 @@
 
       if (expected_prices && expected_prices.length) {
         traces.push({
-          type: "scatter",
-          mode: "lines+markers",
-          x: expirations,
-          y: expected_prices,
+          type: "scatter", mode: "lines+markers", x: expirations, y: expected_prices,
           line: { color: "#2563eb", width: 2 },
-          marker: { size: 8, color: "#2563eb", symbol: "diamond", line: { color: "#fff", width: 1.5 } },
+          marker: { size: 8, color: "#2563eb", symbol: "diamond", line: { color: t.plot_bgcolor, width: 1.5 } },
           name: "Weighted avg prediction",
           hovertemplate: "Predicted: $%{y:.2f}<br>Expiry: %{x}<extra></extra>",
         });
@@ -373,19 +500,20 @@
 
       const hasOverlay = spot_price != null || (expected_prices && expected_prices.length);
       const layout = {
-        ...PLOTLY_LAYOUT_BASE,
-        yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: "Price", font: { size: 12, color: "#6b6b6b" } } },
+        ...getLayoutBase(),
+        yaxis: { ...getLayoutBase().yaxis, title: { text: "Price", font: { size: 12, color: t.secondaryColor } } },
         showlegend: hasOverlay,
-        legend: { x: 1.08, y: 1, font: { color: "#6b6b6b", size: 11 } },
+        legend: { x: 1.08, y: 1, font: { color: t.secondaryColor, size: 11 } },
       };
 
-      Plotly.newPlot("plot", traces, layout, { responsive: true });
+      Plotly.newPlot("plot", traces, layout, PLOTLY_CONFIG);
     }
 
     function render() {
       if (_data && _data.metric === "probability") { renderProbability(); return; }
 
       const { strikes, expirations, calls, puts, metric, spot_price } = _data;
+      const t = getPlotlyTheme();
 
       let z;
       if (_view === "calls") z = calls;
@@ -397,51 +525,50 @@
         : metric === "impliedVolatility" ? "Implied Volatility" : metric;
 
       const traces = [{
-        type: "heatmap",
-        x: expirations,
-        y: strikes,
-        z,
-        colorscale: colorscaleFor(metric, _view),
-        hoverongaps: false,
-        colorbar: { title: label, tickfont: { color: "#6b6b6b" }, titlefont: { color: "#6b6b6b" } },
+        type: "heatmap", x: expirations, y: strikes, z,
+        colorscale: colorscaleFor(metric, _view), hoverongaps: false,
+        colorbar: { title: label, tickfont: { color: t.secondaryColor }, titlefont: { color: t.secondaryColor } },
         hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${formatHover(metric)}<extra></extra>`,
       }];
 
       if (spot_price != null) {
         traces.push({
-          type: "scatter",
-          mode: "lines+markers",
-          x: expirations,
+          type: "scatter", mode: "lines+markers", x: expirations,
           y: Array(expirations.length).fill(spot_price),
-          line: { color: "#1a1a1a", width: 2, dash: "dot" },
-          marker: { size: 8, color: "#1a1a1a", symbol: "circle", line: { color: "#fff", width: 1.5 } },
+          line: { color: t.font.color, width: 2, dash: "dot" },
+          marker: { size: 8, color: t.font.color, symbol: "circle", line: { color: t.plot_bgcolor, width: 1.5 } },
           name: `Spot $${spot_price.toFixed(2)}`,
           hovertemplate: `Spot: $${spot_price.toFixed(2)}<extra></extra>`,
         });
       }
 
       const layout = {
-        ...PLOTLY_LAYOUT_BASE,
+        ...getLayoutBase(),
         showlegend: spot_price != null,
-        legend: { x: 1.08, y: 1, font: { color: "#6b6b6b", size: 11 } },
+        legend: { x: 1.08, y: 1, font: { color: t.secondaryColor, size: 11 } },
       };
 
-      Plotly.newPlot("plot", traces, layout, { responsive: true });
+      Plotly.newPlot("plot", traces, layout, PLOTLY_CONFIG);
     }
 
+    // --- News ---
     function setNewsMessage(msg) {
+      hideSkeleton("news-skeleton");
       const c = document.getElementById("news-list");
+      c.style.display = "";
       c.textContent = "";
       const p = document.createElement("p");
       p.className = "text-sm text-muted";
-      p.style.cssText = "text-align:center;padding:var(--space-4) 0;grid-column:1/-1;";
+      p.style.cssText = "text-align:center;padding:var(--space-4) 0;";
       p.textContent = msg;
       c.appendChild(p);
     }
 
     function buildNewsItem(a) {
       const item = document.createElement("div");
-      item.className = "news-item";
+      const sentClass = a.sentiment_label === "positive" ? "news-item--positive"
+        : a.sentiment_label === "negative" ? "news-item--negative" : "news-item--neutral";
+      item.className = `news-item-compact ${sentClass}`;
 
       const topRow = document.createElement("div");
       topRow.className = "flex justify-between items-center gap-2";
@@ -452,16 +579,17 @@
       badge.className = `badge ${badgeClass}`;
       badge.textContent = a.sentiment_label;
 
-      const time = document.createElement("span");
-      time.className = "text-xs text-muted";
-      time.textContent = a.published || "";
+      const source = document.createElement("span");
+      source.className = "text-xs text-muted";
+      source.textContent = a.source || "";
 
       topRow.appendChild(badge);
-      topRow.appendChild(time);
+      topRow.appendChild(source);
       item.appendChild(topRow);
 
       const title = document.createElement("p");
       title.className = "news-title";
+      title.style.fontSize = "var(--text-sm)";
       title.textContent = a.title;
 
       try {
@@ -481,26 +609,22 @@
         item.appendChild(title);
       }
 
-      const source = document.createElement("p");
-      source.className = "text-xs text-secondary";
-      source.textContent = a.source;
-      item.appendChild(source);
-
       return item;
     }
 
     async function loadNews() {
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
-      const container = document.getElementById("news-list");
-      setNewsMessage("Loading...");
 
       try {
-        const res = await fetch(`/api/news/${ticker}?limit=5`);
+        const res = await fetch(`/api/news/${ticker}?limit=8`);
         if (!res.ok) throw new Error("Failed to load news");
         const data = await res.json();
 
         if (!data.articles.length) { setNewsMessage("No news found."); return; }
 
+        hideSkeleton("news-skeleton");
+        const container = document.getElementById("news-list");
+        container.style.display = "";
         container.textContent = "";
         data.articles.forEach(a => container.appendChild(buildNewsItem(a)));
       } catch {
@@ -508,6 +632,164 @@
       }
     }
 
+    // --- Company Info ---
+    async function loadCompanyInfo() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      try {
+        const res = await fetch(`/api/company/${ticker}`);
+        if (!res.ok) return;
+        const d = await res.json();
+
+        const hasData = d.market_cap || d.pe_ratio || d.eps;
+        if (!hasData) { hideEl("company-strip"); return; }
+
+        function setStat(id, val) {
+          const el = document.getElementById(id);
+          if (el) el.textContent = val || "--";
+        }
+
+        setStat("stat-mcap", d.market_cap);
+        setStat("stat-pe", d.pe_ratio);
+        setStat("stat-eps", d.eps);
+        setStat("stat-beta", d.beta);
+        setStat("stat-52w", d.week_52_range);
+        setStat("stat-vol", d.avg_volume);
+        setStat("stat-earnings", d.earnings_date || "--");
+        setStat("stat-rec", d.target_price ? `$${d.target_price.split(" ")[0]}` : (d.recommendation || "--"));
+
+        showEl("company-strip");
+      } catch {}
+    }
+
+    // --- Divergence ---
+    async function loadDivergence() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      const banner = document.getElementById("divergence-banner");
+
+      try {
+        const res = await fetch(`/api/divergence/${ticker}`);
+        if (!res.ok) { banner.style.display = "none"; return; }
+        const d = await res.json();
+
+        document.getElementById("div-pcr").textContent = d.put_call_ratio.toFixed(2);
+        const sentStr = (d.avg_sentiment >= 0 ? "+" : "") + d.avg_sentiment.toFixed(3);
+        document.getElementById("div-sentiment").textContent = sentStr;
+
+        document.getElementById("divergence-detail").textContent = d.signal;
+
+        if (d.divergence) {
+          const isBullish = d.divergence_type === "bullish_divergence";
+          const typeLabel = isBullish ? "Bullish Divergence" : "Bearish Divergence";
+          document.getElementById("divergence-title").textContent = `${ticker}: ${typeLabel} Detected`;
+          banner.className = `divergence-banner ${isBullish ? "divergence-banner--bullish" : "divergence-banner--bearish"}`;
+        } else {
+          document.getElementById("divergence-title").textContent = `${ticker}: ${d.positioning} flow, ${d.sentiment_label} sentiment`;
+          const isBullish = d.positioning === "bullish" || d.sentiment_label === "bullish";
+          const isBearish = d.positioning === "bearish" || d.sentiment_label === "bearish";
+          banner.className = `divergence-banner ${isBullish ? "divergence-banner--bullish-subtle" : isBearish ? "divergence-banner--bearish-subtle" : "divergence-banner--neutral"}`;
+        }
+
+        banner.style.display = "";
+      } catch {
+        banner.style.display = "none";
+      }
+    }
+
+    // --- Sentiment Breakdown ---
+    async function loadSentimentBreakdown() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+
+      try {
+        const res = await fetch(`/api/news/${ticker}?limit=30`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (!data.articles.length) {
+          hideSkeleton("sentiment-skeleton");
+          showEl("sentiment-content");
+          document.getElementById("sent-overall-score").textContent = "--";
+          document.getElementById("sent-overall-label").textContent = "No data";
+          document.getElementById("sentiment-sources").innerHTML = "";
+          return;
+        }
+
+        document.getElementById("sentiment-subtitle").textContent = `${ticker} sentiment from News, Twitter, and Reddit`;
+
+        const sources = { "News": [], "Twitter": [], "Reddit": [] };
+        const all = [];
+
+        data.articles.forEach(a => {
+          all.push(a.sentiment_score);
+          if (a.source && a.source.includes("Twitter")) sources["Twitter"].push(a.sentiment_score);
+          else if (a.source && a.source.includes("Reddit")) sources["Reddit"].push(a.sentiment_score);
+          else sources["News"].push(a.sentiment_score);
+        });
+
+        const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+        const overall = avg(all);
+
+        const scoreEl = document.getElementById("sent-overall-score");
+        scoreEl.textContent = (overall >= 0 ? "+" : "") + overall.toFixed(3);
+        scoreEl.className = `sentiment-score-big ${overall >= 0.05 ? "sent--positive" : overall <= -0.05 ? "sent--negative" : "sent--neutral"}`;
+
+        const label = overall >= 0.05 ? "Bullish" : overall <= -0.05 ? "Bearish" : "Neutral";
+        document.getElementById("sent-overall-label").textContent = label;
+
+        const pct = ((overall + 1) / 2) * 100;
+        document.getElementById("sent-overall-bar").style.width = pct + "%";
+        document.getElementById("sent-overall-marker").style.left = pct + "%";
+
+        const container = document.getElementById("sentiment-sources");
+        container.innerHTML = "";
+
+        for (const [name, scores] of Object.entries(sources)) {
+          const icon = name === "News" ? "newspaper" : name === "Twitter" ? "twitter" : "reddit";
+          const srcAvg = avg(scores);
+          const srcLabel = srcAvg >= 0.05 ? "positive" : srcAvg <= -0.05 ? "negative" : "neutral";
+          const badgeClass = srcLabel === "positive" ? "badge--positive" : srcLabel === "negative" ? "badge--negative" : "badge--neutral";
+          const barPct = ((srcAvg + 1) / 2) * 100;
+
+          const row = document.createElement("div");
+          row.className = "sentiment-source-row";
+
+          const nameEl = document.createElement("div");
+          nameEl.className = "sentiment-source-name";
+          nameEl.textContent = name;
+          row.appendChild(nameEl);
+
+          const barTrack = document.createElement("div");
+          barTrack.className = "sentiment-source-bar-track";
+          const barFill = document.createElement("div");
+          barFill.className = "sentiment-source-bar-fill";
+          barFill.style.width = barPct + "%";
+          barTrack.appendChild(barFill);
+          row.appendChild(barTrack);
+
+          const scoreSpan = document.createElement("div");
+          scoreSpan.className = "sentiment-source-score font-mono";
+          scoreSpan.textContent = scores.length ? ((srcAvg >= 0 ? "+" : "") + srcAvg.toFixed(3)) : "--";
+          row.appendChild(scoreSpan);
+
+          const badge = document.createElement("span");
+          badge.className = `badge ${badgeClass}`;
+          badge.textContent = scores.length ? srcLabel : "n/a";
+          row.appendChild(badge);
+
+          const countSpan = document.createElement("span");
+          countSpan.className = "text-xs text-muted";
+          countSpan.textContent = scores.length + " articles";
+          row.appendChild(countSpan);
+          container.appendChild(row);
+        }
+
+        hideSkeleton("sentiment-skeleton");
+        showEl("sentiment-content");
+      } catch {
+        hideSkeleton("sentiment-skeleton");
+      }
+    }
+
+    // --- Auth & Push ---
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
@@ -519,21 +801,36 @@
       } catch { window.location.href = "/login"; }
     }
 
+    function setNotifIcon(enabled) {
+      document.getElementById("notif-icon-off").style.display = enabled ? "none" : "block";
+      document.getElementById("notif-icon-on").style.display = enabled ? "block" : "none";
+      document.getElementById("notif-btn").title = enabled ? "Notifications enabled" : "Enable notifications";
+    }
+
     async function initPush() {
       if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
       try {
         const reg = await navigator.serviceWorker.register("/sw.js");
         const existing = await reg.pushManager.getSubscription();
-        if (existing) return;
+        if (existing) { setNotifIcon(true); return; }
 
         const res = await fetch("/api/push/vapid-key");
         const { publicKey } = await res.json();
         if (!publicKey) return;
 
-        const btn = document.querySelector('[title="Notifications"]');
+        const btn = document.getElementById("notif-btn");
         btn.addEventListener("click", async () => {
+          const existingSub = await reg.pushManager.getSubscription();
+          if (existingSub) {
+            await existingSub.unsubscribe();
+            await fetch("/api/push/subscribe", { method: "DELETE" });
+            setNotifIcon(false);
+            showToast("Notifications disabled");
+            return;
+          }
+
           const permission = await Notification.requestPermission();
-          if (permission !== "granted") return;
+          if (permission !== "granted") { showToast("Notification permission denied"); return; }
 
           const sub = await reg.pushManager.subscribe({
             userVisibleOnly: true,
@@ -546,10 +843,10 @@
             body: JSON.stringify({ subscription: sub.toJSON() }),
           });
 
-          btn.style.color = "var(--color-accent-green)";
-          btn.title = "Notifications enabled";
+          setNotifIcon(true);
+          showToast("Notifications enabled");
         });
-      } catch { /* push not available */ }
+      } catch {}
     }
 
     function urlBase64ToUint8Array(base64String) {
@@ -561,13 +858,51 @@
       return arr;
     }
 
-    // Init
+    // --- Init ---
     const urlTicker = new URLSearchParams(window.location.search).get("ticker");
     if (urlTicker) document.getElementById("ticker").value = urlTicker.toUpperCase();
+    // --- Toast ---
+    function showToast(msg, duration = 4000) {
+      const t = document.getElementById("toast");
+      document.getElementById("toast-msg").textContent = msg;
+      t.style.display = "";
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => { t.style.display = "none"; }, duration);
+    }
+
+    // --- Scan Watchlist ---
+    async function scanWatchlist() {
+      const btn = document.getElementById("scan-btn");
+      btn.disabled = true;
+      btn.style.opacity = "0.5";
+      showToast("Scanning watchlist for divergences...", 10000);
+
+      try {
+        const res = await fetch("/api/scan", { method: "POST" });
+        if (!res.ok) { showToast("Scan failed. Are you logged in?"); return; }
+        const data = await res.json();
+
+        if (data.divergences_found > 0) {
+          const tickers = data.alerts.map(a => a.ticker).join(", ");
+          showToast(`Found ${data.divergences_found} divergence(s): ${tickers}`, 6000);
+        } else {
+          showToast(`Scanned ${data.scanned} tickers. No divergences found.`);
+        }
+      } catch {
+        showToast("Scan failed.");
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = "";
+      }
+    }
+
+    document.getElementById("ticker").addEventListener("keydown", e => {
+      if (e.key === "Enter") load();
+    });
+
     loadUser();
     onMetricChange();
     load();
-    loadNews();
     initPush();
   </script>
 </body>

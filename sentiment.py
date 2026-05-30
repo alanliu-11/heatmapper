@@ -1,31 +1,25 @@
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
 
-_analyzer = SentimentIntensityAnalyzer()
+_tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
+_model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
+_model.eval()
+
+_LABELS = ["positive", "negative", "neutral"]
 
 
 def analyze(text: str) -> dict:
-    """Return sentiment scores for a piece of text.
-
-    Returns dict with: compound (-1 to 1), label (positive/negative/neutral).
-    """
-    scores = _analyzer.polarity_scores(text)
-    compound = scores["compound"]
-
-    if compound >= 0.05:
-        label = "positive"
-    elif compound <= -0.05:
-        label = "negative"
-    else:
-        label = "neutral"
-
-    return {"compound": compound, "label": label}
+    inputs = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        logits = _model(**inputs).logits
+    probs = torch.softmax(logits, dim=1).squeeze()
+    idx = probs.argmax().item()
+    label = _LABELS[idx]
+    compound = float(probs[0] - probs[1])
+    return {"compound": round(compound, 4), "label": label}
 
 
 def analyze_articles(articles: list[dict]) -> list[dict]:
-    """Add sentiment scores to a list of news articles.
-
-    Analyzes title + snippet combined for better accuracy.
-    """
     results = []
     for article in articles:
         text = f"{article['title']}. {article.get('snippet', '')}"

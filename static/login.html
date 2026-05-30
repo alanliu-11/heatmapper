@@ -3,56 +3,136 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Heatmapper - Login</title>
+  <title>Heatmapper - Options Intelligence Meets Sentiment Analysis</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+    const saved = localStorage.getItem("theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    else if (window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.setAttribute("data-theme", "dark");
+  </script>
   <style>
-    body {
+    body { background: var(--color-bg); }
+
+    .landing { max-width: 960px; margin: 0 auto; padding: var(--space-8) var(--space-6); }
+
+    .landing-header {
+      text-align: center;
+      padding: var(--space-12) 0 var(--space-8);
+    }
+
+    .landing-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-3);
+      font-size: var(--text-2xl);
+      font-weight: 800;
+      color: var(--color-text);
+      margin-bottom: var(--space-6);
+    }
+
+    .landing-logo svg { width: 36px; height: 36px; }
+
+    .landing-headline {
+      font-size: 2.25rem;
+      font-weight: 800;
+      color: var(--color-text);
+      line-height: 1.15;
+      margin-bottom: var(--space-4);
+      letter-spacing: -0.02em;
+    }
+
+    .landing-headline span { color: var(--color-primary); }
+
+    .landing-sub {
+      font-size: var(--text-lg);
+      color: var(--color-text-secondary);
+      max-width: 600px;
+      margin: 0 auto var(--space-8);
+      line-height: 1.6;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-6);
+      margin-bottom: var(--space-10);
+    }
+
+    .feature-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      text-align: center;
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-lg);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: var(--space-4);
+      color: white;
+    }
+
+    .feature-icon--orange { background: var(--color-primary); }
+    .feature-icon--blue { background: var(--color-accent-blue); }
+    .feature-icon--green { background: var(--color-accent-green); }
+
+    .feature-title {
+      font-size: var(--text-md);
+      font-weight: 600;
+      color: var(--color-text);
+      margin-bottom: var(--space-2);
+    }
+
+    .feature-desc {
+      font-size: var(--text-sm);
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }
+
+    .powered-strip {
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
-      background: var(--color-bg);
+      gap: var(--space-6);
+      padding: var(--space-4) 0;
+      margin-bottom: var(--space-8);
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
-    .auth-container {
-      width: 100%;
+
+    .powered-strip span { font-weight: 600; color: var(--color-text-secondary); }
+
+    .login-section {
       max-width: 400px;
-      padding: var(--space-6);
+      margin: 0 auto;
     }
+
     .auth-card {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-xl);
-      padding: var(--space-10);
+      padding: var(--space-8);
       box-shadow: var(--shadow-md);
     }
-    .auth-logo {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-3);
-      margin-bottom: var(--space-8);
+
+    .auth-card h2 {
       font-size: var(--text-xl);
       font-weight: 700;
-    }
-    .auth-logo svg { width: 32px; height: 32px; }
-    .auth-title {
-      font-size: var(--text-2xl);
-      font-weight: 700;
       text-align: center;
-      margin-bottom: var(--space-1);
+      margin-bottom: var(--space-6);
     }
-    .auth-subtitle {
-      text-align: center;
-      color: var(--color-text-secondary);
-      font-size: var(--text-sm);
-      margin-bottom: var(--space-8);
-    }
-    .form-group {
-      margin-bottom: var(--space-5);
-    }
+
+    .form-group { margin-bottom: var(--space-5); }
     .form-group label {
       display: block;
       font-size: var(--text-sm);
@@ -65,6 +145,7 @@
       padding: var(--space-3) var(--space-4);
       font-size: var(--text-base);
     }
+
     .auth-btn {
       width: 100%;
       padding: var(--space-3) var(--space-4);
@@ -81,18 +162,18 @@
     }
     .auth-btn:hover { background: #333; }
     .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    [data-theme="dark"] .auth-btn { background: #e5e5e5; color: #1a1a1a; }
+    [data-theme="dark"] .auth-btn:hover { background: #ccc; }
+
     .auth-footer {
       text-align: center;
       margin-top: var(--space-6);
       font-size: var(--text-sm);
       color: var(--color-text-secondary);
     }
-    .auth-footer a {
-      color: var(--color-primary);
-      text-decoration: none;
-      font-weight: 600;
-    }
+    .auth-footer a { color: var(--color-primary); text-decoration: none; font-weight: 600; }
     .auth-footer a:hover { text-decoration: underline; }
+
     .auth-error {
       color: var(--color-accent-red);
       font-size: var(--text-sm);
@@ -103,12 +184,19 @@
       margin-bottom: var(--space-4);
       display: none;
     }
+    [data-theme="dark"] .auth-error { background: #2d1111; border-color: #5c1a1a; }
+
+    @media (max-width: 768px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .landing-headline { font-size: 1.75rem; }
+    }
   </style>
 </head>
 <body>
-  <div class="auth-container">
-    <div class="auth-card">
-      <div class="auth-logo">
+
+  <div class="landing">
+    <header class="landing-header">
+      <div class="landing-logo">
         <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect width="28" height="28" rx="6" fill="#1a1a1a"/>
           <rect x="4" y="16" width="4" height="8" rx="1" fill="#e8913a"/>
@@ -119,26 +207,70 @@
         Heatmapper
       </div>
 
-      <h1 class="auth-title">Welcome back</h1>
-      <p class="auth-subtitle">Sign in to your account</p>
-
-      <div class="auth-error" id="error"></div>
-
-      <form id="login-form" onsubmit="handleLogin(event)">
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input class="input-field" id="username" type="text" placeholder="Enter your username" required autocomplete="username" />
-        </div>
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input class="input-field" id="password" type="password" placeholder="Enter your password" required autocomplete="current-password" />
-        </div>
-        <button class="auth-btn" type="submit" id="submit-btn">Sign in</button>
-      </form>
-
-      <p class="auth-footer">
-        Don't have an account? <a href="/register">Create one</a>
+      <h1 class="landing-headline">
+        Options Intelligence Meets<br/><span>Sentiment Analysis</span>
+      </h1>
+      <p class="landing-sub">
+        Overlay real-time news, Twitter, and Reddit sentiment on top of options flow data.
+        Spot divergences between where the market is positioned and what the crowd is saying.
       </p>
+    </header>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon feature-icon--orange">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        </div>
+        <div class="feature-title">Options Heatmap</div>
+        <div class="feature-desc">Visualize open interest, volume, IV, and price probability across strikes and expirations in real time.</div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon feature-icon--blue">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+        </div>
+        <div class="feature-title">FinBERT Sentiment</div>
+        <div class="feature-desc">AI-powered financial sentiment analysis across news, Twitter, and Reddit using the FinBERT transformer model.</div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon feature-icon--green">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div class="feature-title">Divergence Alerts</div>
+        <div class="feature-desc">Automatic detection when sentiment contradicts options positioning. Spot opportunities before the crowd catches up.</div>
+      </div>
+    </div>
+
+    <div class="powered-strip">
+      Powered by
+      <span>Bright Data SERP API</span>
+      <span>Bright Data Web Scraper API</span>
+      <span>FinBERT</span>
+      <span>yfinance</span>
+    </div>
+
+    <div class="login-section">
+      <div class="auth-card">
+        <h2>Sign In</h2>
+        <div class="auth-error" id="error"></div>
+
+        <form id="login-form" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input class="input-field" id="username" type="text" placeholder="Enter your username" required autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input class="input-field" id="password" type="password" placeholder="Enter your password" required autocomplete="current-password" />
+          </div>
+          <button class="auth-btn" type="submit" id="submit-btn">Sign in</button>
+        </form>
+
+        <p class="auth-footer">
+          Don't have an account? <a href="/register">Create one</a>
+        </p>
+      </div>
     </div>
   </div>
 
