@@ -298,7 +298,22 @@ def divergence(ticker: str):
 
     total_call_oi = int(df[df["type"] == "call"]["openInterest"].sum())
     total_put_oi = int(df[df["type"] == "put"]["openInterest"].sum())
+    total_oi = total_call_oi + total_put_oi
     pcr = round(total_put_oi / total_call_oi, 3) if total_call_oi > 0 else 999.0
+
+    strikes = sorted(df["strike"].unique())
+    max_pain_strike = None
+    min_pain = float("inf")
+    for s in strikes:
+        pain = 0.0
+        for _, r in df.iterrows():
+            if r["type"] == "call" and s > r["strike"]:
+                pain += (s - r["strike"]) * r["openInterest"]
+            elif r["type"] == "put" and s < r["strike"]:
+                pain += (r["strike"] - s) * r["openInterest"]
+        if pain < min_pain:
+            min_pain = pain
+            max_pain_strike = float(s)
 
     if pcr < 0.7:
         positioning = "bullish"
@@ -358,6 +373,8 @@ def divergence(ticker: str):
         "signal": signal,
         "total_call_oi": total_call_oi,
         "total_put_oi": total_put_oi,
+        "total_oi": total_oi,
+        "max_pain": max_pain_strike,
     }
 
 

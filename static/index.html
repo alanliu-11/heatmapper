@@ -124,13 +124,25 @@
         <span class="font-semibold font-mono" id="stat-nearest-expiry">--</span>
       </div>
       <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">P/C Ratio</span>
+        <span class="font-semibold font-mono" id="stat-pcr">--</span>
+      </div>
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Total OI</span>
+        <span class="font-semibold font-mono" id="stat-total-oi">--</span>
+      </div>
+      <div class="stats-strip-item">
+        <span class="text-xs text-muted uppercase tracking-wide">Max Pain</span>
+        <span class="font-semibold font-mono" id="stat-max-pain">--</span>
+      </div>
+      <div class="stats-strip-item">
         <span class="text-xs text-muted uppercase tracking-wide">Metric</span>
         <span class="badge badge--info" id="stat-metric">Probability</span>
       </div>
     </div>
 
     <!-- Company Stats Strip -->
-    <div class="stats-strip mb-4" id="company-strip" style="display:none;">
+    <div class="stats-strip mb-4 stats-strip--visible" id="company-strip">
       <div class="stats-strip-item" id="company-mcap">
         <span class="text-xs text-muted uppercase tracking-wide">Mkt Cap</span>
         <span class="font-semibold font-mono" id="stat-mcap">--</span>
@@ -166,13 +178,13 @@
     </div>
 
     <!-- Divergence Alert Banner -->
-    <div class="divergence-banner" id="divergence-banner" style="display:none;">
+    <div class="divergence-banner divergence-banner--loading" id="divergence-banner">
       <div class="divergence-icon" id="divergence-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </div>
       <div class="divergence-content">
-        <div class="divergence-title" id="divergence-title"></div>
-        <div class="divergence-detail" id="divergence-detail"></div>
+        <div class="divergence-title" id="divergence-title">Divergence Analysis</div>
+        <div class="divergence-detail" id="divergence-detail">Load a ticker to analyze sentiment-options divergence</div>
       </div>
       <div class="divergence-metrics">
         <div class="divergence-metric">
@@ -657,9 +669,6 @@
         if (!res.ok) return;
         const d = await res.json();
 
-        const hasData = d.market_cap || d.pe_ratio || d.eps;
-        if (!hasData) { hideEl("company-strip"); return; }
-
         function setStat(id, val) {
           const el = document.getElementById(id);
           if (el) el.textContent = val || "--";
@@ -673,8 +682,6 @@
         setStat("stat-vol", d.avg_volume);
         setStat("stat-earnings", d.earnings_date || "--");
         setStat("stat-rec", d.target_price ? `$${d.target_price.split(" ")[0]}` : (d.recommendation || "--"));
-
-        showEl("company-strip");
       } catch {}
     }
 
@@ -683,14 +690,28 @@
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
       const banner = document.getElementById("divergence-banner");
 
+      banner.className = "divergence-banner divergence-banner--loading";
+      document.getElementById("divergence-title").textContent = "Analyzing...";
+      document.getElementById("divergence-detail").textContent = `Running divergence analysis for ${ticker}`;
+      document.getElementById("div-pcr").textContent = "--";
+      document.getElementById("div-sentiment").textContent = "--";
+
       try {
         const res = await fetch(`/api/divergence/${ticker}`);
-        if (!res.ok) { banner.style.display = "none"; return; }
+        if (!res.ok) {
+          document.getElementById("divergence-title").textContent = "Divergence Analysis";
+          document.getElementById("divergence-detail").textContent = "Could not load divergence data";
+          return;
+        }
         const d = await res.json();
 
         document.getElementById("div-pcr").textContent = d.put_call_ratio.toFixed(2);
         const sentStr = (d.avg_sentiment >= 0 ? "+" : "") + d.avg_sentiment.toFixed(3);
         document.getElementById("div-sentiment").textContent = sentStr;
+
+        document.getElementById("stat-pcr").textContent = d.put_call_ratio.toFixed(2);
+        document.getElementById("stat-total-oi").textContent = d.total_oi >= 1e6 ? (d.total_oi / 1e6).toFixed(1) + "M" : d.total_oi >= 1e3 ? (d.total_oi / 1e3).toFixed(0) + "K" : d.total_oi;
+        document.getElementById("stat-max-pain").textContent = d.max_pain ? "$" + d.max_pain.toFixed(0) : "--";
 
         document.getElementById("divergence-detail").textContent = d.signal;
 
@@ -705,10 +726,10 @@
           const isBearish = d.positioning === "bearish" || d.sentiment_label === "bearish";
           banner.className = `divergence-banner ${isBullish ? "divergence-banner--bullish-subtle" : isBearish ? "divergence-banner--bearish-subtle" : "divergence-banner--neutral"}`;
         }
-
-        banner.style.display = "";
       } catch {
-        banner.style.display = "none";
+        document.getElementById("divergence-title").textContent = "Divergence Analysis";
+        document.getElementById("divergence-detail").textContent = "Could not load divergence data";
+        banner.className = "divergence-banner divergence-banner--loading";
       }
     }
 

@@ -838,6 +838,7 @@ select.input-field {
   gap: var(--space-4);
   padding: var(--space-4) var(--space-6);
   border-radius: var(--radius-lg);
+  margin-top: var(--space-4);
   margin-bottom: var(--space-4);
   border: 1px solid;
 }
@@ -870,6 +871,18 @@ select.input-field {
   background: var(--color-surface-alt);
   border-color: var(--color-border);
   color: var(--color-text-secondary);
+}
+
+.divergence-banner--loading {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .divergence-banner--loading {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .divergence-banner--bullish {

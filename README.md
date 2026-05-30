@@ -72,7 +72,6 @@ cache.py            In-memory TTL cache (15 min)
 news_scraper.py     Bright Data SERP API + Web Unlocker API
 sentiment.py        FinBERT sentiment analysis (ProsusAI/finbert)
 notifications.py    Web Push notification sender
-email_digest.py     Weekly email TLDR
 static/
   index.html        Dashboard (heatmaps, sentiment, divergence, news)
   login.html        Landing page + login
@@ -91,7 +90,6 @@ static/
 | `SECRET_KEY` | For production | JWT signing key |
 | `VAPID_PRIVATE_KEY` | For push | Web Push private key |
 | `VAPID_PUBLIC_KEY` | For push | Web Push public key |
-| `SMTP_HOST` | No | Email digest SMTP host |
 
 ## Tech Stack
 

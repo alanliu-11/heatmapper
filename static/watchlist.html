@@ -41,6 +41,10 @@
       <button class="btn-icon" title="Scan watchlist for divergences" id="scan-btn" onclick="scanWatchlist()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
+      <button class="btn-icon" title="Enable notifications" id="notif-btn" onclick="toggleNotif()">
+        <svg id="notif-icon-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23" stroke-width="2"/></svg>
+        <svg id="notif-icon-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;color:var(--color-accent-green)"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
       <a href="/settings" id="user-avatar" class="user-avatar" title="Settings">U</a>
     </div>
   </nav>
@@ -303,8 +307,47 @@
       }
     }
 
+    function setNotifIcon(enabled) {
+      document.getElementById("notif-icon-off").style.display = enabled ? "none" : "block";
+      document.getElementById("notif-icon-on").style.display = enabled ? "block" : "none";
+      document.getElementById("notif-btn").title = enabled ? "Notifications enabled" : "Enable notifications";
+    }
+    async function toggleNotif() {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+        await fetch("/api/push/subscribe", { method: "DELETE" });
+        setNotifIcon(false);
+        showToast("Notifications disabled");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { showToast("Notification permission denied"); return; }
+      const res = await fetch("/api/push/vapid-key");
+      const { publicKey } = await res.json();
+      if (!publicKey) return;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      await fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscription: sub.toJSON() }) });
+      setNotifIcon(true);
+      showToast("Notifications enabled");
+    }
+    function urlBase64ToUint8Array(b) {
+      const p = "=".repeat((4 - (b.length % 4)) % 4);
+      const d = atob((b + p).replace(/-/g, "+").replace(/_/g, "/"));
+      const a = new Uint8Array(d.length);
+      for (let i = 0; i < d.length; i++) a[i] = d.charCodeAt(i);
+      return a;
+    }
+    async function checkNotifState() {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+      try { const r = await navigator.serviceWorker.getRegistration("/sw.js"); if (r) { const s = await r.pushManager.getSubscription(); if (s) setNotifIcon(true); } } catch {}
+    }
+
     loadUser();
     loadWatchlist();
+    checkNotifState();
   </script>
   <div class="toast" id="toast" style="display:none;"><span id="toast-msg"></span></div>
 </body>
