@@ -49,11 +49,16 @@ def get_current_user(request: Request) -> dict | None:
 
 # --- Pages ---
 
+def _clear_stale_cookie(response: FileResponse, request: Request) -> FileResponse:
+    if request.cookies.get("token"):
+        response.delete_cookie("token", path="/")
+    return response
+
 @app.get("/")
 def index(request: Request):
     user = get_current_user(request)
     if not user:
-        return FileResponse("static/landing.html")
+        return _clear_stale_cookie(FileResponse("static/landing.html"), request)
     return FileResponse("static/index.html")
 
 @app.get("/register")
@@ -72,21 +77,21 @@ def service_worker():
 def news_page(request: Request):
     user = get_current_user(request)
     if not user:
-        return FileResponse("static/login.html")
+        return _clear_stale_cookie(FileResponse("static/landing.html"), request)
     return FileResponse("static/news.html")
 
 @app.get("/settings")
 def settings_page(request: Request):
     user = get_current_user(request)
     if not user:
-        return FileResponse("static/login.html")
+        return _clear_stale_cookie(FileResponse("static/landing.html"), request)
     return FileResponse("static/settings.html")
 
 @app.get("/watchlist")
 def watchlist_page(request: Request):
     user = get_current_user(request)
     if not user:
-        return FileResponse("static/login.html")
+        return _clear_stale_cookie(FileResponse("static/landing.html"), request)
     return FileResponse("static/watchlist.html")
 
 
@@ -112,6 +117,22 @@ def login(body: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     token = create_token(user["id"], user["username"])
     response = JSONResponse({"ok": True, "username": user["username"]})
+    response.set_cookie(
+        "token", token, httponly=True, samesite="lax", max_age=7 * 24 * 3600, path="/"
+    )
+    return response
+
+@app.post("/auth/login")
+async def form_login(request: Request):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    username = form.get("username", "")
+    password = form.get("password", "")
+    user = authenticate(username, password)
+    if not user:
+        return RedirectResponse("/login?error=1", status_code=303)
+    token = create_token(user["id"], user["username"])
+    response = RedirectResponse("/", status_code=303)
     response.set_cookie(
         "token", token, httponly=True, samesite="lax", max_age=7 * 24 * 3600, path="/"
     )

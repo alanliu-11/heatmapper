@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.plot.ly; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.plot.ly; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; connect-src 'self'; img-src 'self' data:;" />
   <title>Heatmapper</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -793,12 +793,15 @@
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
-        if (!res.ok) { window.location.href = "/login"; return; }
+        if (res.status === 401) { window.location.href = "/"; return; }
+        if (!res.ok) return;
         const user = await res.json();
         const avatar = document.getElementById("user-avatar");
         avatar.textContent = user.username.charAt(0).toUpperCase();
         avatar.title = `Signed in as ${user.username}`;
-      } catch { window.location.href = "/login"; }
+      } catch (err) {
+        console.error("loadUser failed:", err);
+      }
     }
 
     function setNotifIcon(enabled) {

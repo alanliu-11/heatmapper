@@ -142,7 +142,7 @@
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
-        if (!res.ok) { window.location.href = "/login"; return; }
+        if (!res.ok) { window.location.href = "/"; return; }
         const user = await res.json();
         document.getElementById("user-avatar").textContent = user.username.charAt(0).toUpperCase();
         document.getElementById("settings-username").textContent = user.username;
@@ -151,12 +151,12 @@
           document.getElementById("digest-status").textContent = "Active";
           document.getElementById("digest-status").className = "badge badge--positive";
         }
-      } catch { window.location.href = "/login"; }
+      } catch { window.location.href = "/"; }
     }
 
     async function handleLogout() {
       await fetch("/api/logout", { method: "POST" });
-      window.location.href = "/login";
+      window.location.href = "/";
     }
 
     function showMsg(id, text, isError) {

@@ -85,18 +85,18 @@
       <h1 class="auth-title">Welcome back</h1>
       <p class="auth-subtitle">Sign in to your account</p>
 
-      <div class="auth-error" id="error"></div>
+      <div class="auth-error" id="error" style="display:none;">Invalid username or password</div>
 
-      <form id="login-form" onsubmit="handleLogin(event)">
+      <form action="/auth/login" method="POST">
         <div class="form-group">
           <label for="username">Username</label>
-          <input class="input-field" id="username" type="text" placeholder="Enter your username" required autocomplete="username" />
+          <input class="input-field" name="username" id="username" type="text" placeholder="Enter your username" required autocomplete="username" />
         </div>
         <div class="form-group">
           <label for="password">Password</label>
-          <input class="input-field" id="password" type="password" placeholder="Enter your password" required autocomplete="current-password" />
+          <input class="input-field" name="password" id="password" type="password" placeholder="Enter your password" required autocomplete="current-password" />
         </div>
-        <button class="auth-btn" type="submit" id="submit-btn">Sign in</button>
+        <button class="auth-btn" type="submit">Sign in</button>
       </form>
 
       <p class="auth-footer">
@@ -106,44 +106,9 @@
   </div>
 
   <script>
-    async function handleLogin(e) {
-      if (e) e.preventDefault();
-      const errEl = document.getElementById("error");
-      const btn = document.getElementById("submit-btn");
-      if (btn.disabled) return;
-      errEl.style.display = "none";
-      btn.disabled = true;
-      btn.textContent = "Signing in...";
-
-      try {
-        const res = await fetch("/api/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: document.getElementById("username").value,
-            password: document.getElementById("password").value,
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || "Login failed");
-        }
-
-        window.location.href = "/";
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.style.display = "block";
-        btn.disabled = false;
-        btn.textContent = "Sign in";
-      }
+    if (new URLSearchParams(window.location.search).has("error")) {
+      document.getElementById("error").style.display = "block";
     }
-
-    document.getElementById("login-form").addEventListener("submit", handleLogin);
-    document.getElementById("submit-btn").addEventListener("click", function(e) {
-      e.preventDefault();
-      handleLogin();
-    });
   </script>
 </body>
 </html>

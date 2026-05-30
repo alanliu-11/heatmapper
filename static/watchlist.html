@@ -85,12 +85,12 @@
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
-        if (!res.ok) { window.location.href = "/login"; return; }
+        if (!res.ok) { window.location.href = "/"; return; }
         const user = await res.json();
         const avatar = document.getElementById("user-avatar");
         avatar.textContent = user.username.charAt(0).toUpperCase();
         avatar.title = `Signed in as ${user.username}`;
-      } catch { window.location.href = "/login"; }
+      } catch { window.location.href = "/"; }
     }
 
     async function loadWatchlist() {
