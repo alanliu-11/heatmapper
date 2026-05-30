@@ -10,3 +10,6 @@ __pycache__/
 
 # Linter cache
 .ruff_cache/
+
+# Logs
+*.log

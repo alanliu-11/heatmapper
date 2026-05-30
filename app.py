@@ -4,15 +4,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
 from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, _parse_chain
-from database import init_db, get_db
+from database import init_db, get_db, seconds_since
 from auth import create_user, authenticate, create_token, verify_token
 from news_scraper import scrape_news, scrape_twitter, scrape_reddit, scrape_all, scrape_company_info
 from sentiment import analyze_articles
 from notifications import VAPID_PUBLIC_KEY, send_push
 from typing import Literal
-import sqlite3
+import psycopg
 import json
-import time as _time
 import asyncio
 import logging
 
@@ -102,7 +101,7 @@ def watchlist_page(request: Request):
 def register(body: RegisterRequest):
     try:
         user = create_user(body.username, body.password)
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         raise HTTPException(status_code=409, detail="Username already taken")
     token = create_token(user["id"], user["username"])
     response = JSONResponse({"ok": True, "username": user["username"]})
@@ -256,10 +255,7 @@ def company_info(ticker: str):
             (ticker,),
         ).fetchone()
 
-        needs_fetch = row is None or (
-            _time.time() - _time.mktime(_time.strptime(row["fetched_at"], "%Y-%m-%d %H:%M:%S"))
-            > COMPANY_CACHE_TTL
-        )
+        needs_fetch = row is None or seconds_since(row["fetched_at"]) > COMPANY_CACHE_TTL
 
         if needs_fetch:
             data = scrape_company_info(ticker)
@@ -392,10 +388,7 @@ def get_news(ticker: str, limit: int = Query(default=10, ge=1, le=50)):
             (ticker,),
         ).fetchone()
 
-        needs_fetch = row is None or (
-            _time.time() - _time.mktime(_time.strptime(row["fetched_at"], "%Y-%m-%d %H:%M:%S"))
-            > NEWS_CACHE_TTL
-        )
+        needs_fetch = row is None or seconds_since(row["fetched_at"]) > NEWS_CACHE_TTL
 
         if needs_fetch:
             articles = scrape_all(ticker)
@@ -457,10 +450,7 @@ def sentiment_heatmap(request: Request, tickers: str = Query(default="")):
                 (ticker,),
             ).fetchone()
 
-            needs_fetch = row is None or (
-                _time.time() - _time.mktime(_time.strptime(row["fetched_at"], "%Y-%m-%d %H:%M:%S"))
-                > NEWS_CACHE_TTL
-            )
+            needs_fetch = row is None or seconds_since(row["fetched_at"]) > NEWS_CACHE_TTL
 
             if needs_fetch:
                 articles = scrape_all(ticker)
@@ -538,7 +528,8 @@ def add_to_watchlist(body: WatchlistRequest, request: Request):
     conn = get_db()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO watchlist (user_id, ticker) VALUES (?, ?)",
+            "INSERT INTO watchlist (user_id, ticker) VALUES (?, ?) "
+            "ON CONFLICT (user_id, ticker) DO NOTHING",
             (user["id"], ticker),
         )
         conn.commit()
@@ -609,7 +600,8 @@ async def push_subscribe(request: Request):
     conn = get_db()
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO push_subscriptions (user_id, subscription_json) VALUES (?, ?)",
+            "INSERT INTO push_subscriptions (user_id, subscription_json) VALUES (?, ?) "
+            "ON CONFLICT (user_id) DO UPDATE SET subscription_json = EXCLUDED.subscription_json",
             (user["id"], sub_json),
         )
         conn.commit()

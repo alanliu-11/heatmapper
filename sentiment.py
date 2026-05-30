@@ -1,21 +1,16 @@
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-_tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
-_model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
-_model.eval()
-
-_LABELS = ["positive", "negative", "neutral"]
+_analyzer = SentimentIntensityAnalyzer()
 
 
 def analyze(text: str) -> dict:
-    inputs = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-    with torch.no_grad():
-        logits = _model(**inputs).logits
-    probs = torch.softmax(logits, dim=1).squeeze()
-    idx = probs.argmax().item()
-    label = _LABELS[idx]
-    compound = float(probs[0] - probs[1])
+    compound = _analyzer.polarity_scores(text)["compound"]
+    if compound >= 0.05:
+        label = "positive"
+    elif compound <= -0.05:
+        label = "negative"
+    else:
+        label = "neutral"
     return {"compound": round(compound, 4), "label": label}
 
 

@@ -2,12 +2,12 @@
 
 Options intelligence platform that overlays real-time sentiment analysis on top of options flow data. Detects divergences between market positioning and crowd narrative.
 
-Built with FastAPI + Plotly.js + SQLite. Powered by **Bright Data** (SERP API + Web Unlocker API) and **FinBERT** financial NLP.
+Built with FastAPI + Plotly.js + Postgres. Powered by **Bright Data** (SERP API + Web Unlocker API) and **VADER** sentiment analysis.
 
 ## Features
 
 - **Options heatmaps** (Open Interest, Volume, IV, Price Probability) with calls/puts/net views
-- **FinBERT sentiment analysis** from News, Twitter, and Reddit via Bright Data SERP API
+- **VADER sentiment analysis** from News, Twitter, and Reddit via Bright Data SERP API
 - **Sentiment-Options divergence detection** with real-time alerts when sentiment contradicts options positioning
 - **Company data** (market cap, P/E, EPS, beta, 52-week range) via Bright Data Web Unlocker API
 - **Per-ticker sentiment breakdown** with per-source scores and visual gauges
@@ -29,12 +29,12 @@ Two Bright Data products are used:
 
 ```bash
 cp .env.example .env
-# Fill in API keys
+# Fill in API keys and DATABASE_URL (a Postgres connection string, e.g. a free Neon DB)
 pip install -r requirements.txt
 uvicorn app:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000).
+The schema is created automatically on startup. Open [http://localhost:8000](http://localhost:8000).
 
 ## API
 
@@ -65,12 +65,12 @@ Open [http://localhost:8000](http://localhost:8000).
 ```
 app.py              FastAPI routes, divergence scanner, background scheduler
 auth.py             JWT auth (PBKDF2-SHA256)
-database.py         SQLite schema (users, watchlist, news, company_data, push_subscriptions)
+database.py         Postgres schema + connection (users, watchlist, news, company_data, push_subscriptions)
 scraper.py          Yahoo Finance options chain fetcher
 processor.py        Heatmap and probability distribution builders
 cache.py            In-memory TTL cache (15 min)
 news_scraper.py     Bright Data SERP API + Web Unlocker API
-sentiment.py        FinBERT sentiment analysis (ProsusAI/finbert)
+sentiment.py        VADER sentiment analysis
 notifications.py    Web Push notification sender
 static/
   index.html        Dashboard (heatmaps, sentiment, divergence, news)
@@ -93,9 +93,9 @@ static/
 
 ## Tech Stack
 
-- **Backend:** Python, FastAPI, SQLite
+- **Backend:** Python, FastAPI, Postgres (psycopg)
 - **Frontend:** Vanilla HTML/CSS/JS, Plotly.js
-- **Sentiment:** FinBERT (ProsusAI/finbert via HuggingFace Transformers)
+- **Sentiment:** VADER (vaderSentiment)
 - **Data:** Bright Data SERP API + Web Unlocker API, Yahoo Finance (yfinance)
 - **Auth:** JWT (PyJWT), PBKDF2-SHA256
 - **Notifications:** Web Push API (pywebpush)

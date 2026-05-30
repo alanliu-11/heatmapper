@@ -4,8 +4,8 @@ yfinance
 pandas
 python-dotenv
 PyJWT
-transformers
-torch
+psycopg[binary]
+vaderSentiment
 requests
 pywebpush
 cryptography
