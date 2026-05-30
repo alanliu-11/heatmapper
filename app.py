@@ -53,7 +53,7 @@ def get_current_user(request: Request) -> dict | None:
 def index(request: Request):
     user = get_current_user(request)
     if not user:
-        return FileResponse("static/login.html")
+        return FileResponse("static/landing.html")
     return FileResponse("static/index.html")
 
 @app.get("/register")
