@@ -186,6 +186,48 @@
     }
     [data-theme="dark"] .auth-error { background: #2d1111; border-color: #5c1a1a; }
 
+    .landing-cta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-4);
+      margin-top: var(--space-2);
+    }
+
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      padding: var(--space-3) var(--space-8);
+      border-radius: var(--radius-md);
+      font-family: var(--font-sans);
+      font-size: var(--text-md);
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+
+    .cta-btn--primary {
+      background: var(--color-primary);
+      color: white;
+      border: 2px solid var(--color-primary);
+    }
+
+    .cta-btn--primary:hover {
+      background: var(--color-primary-hover);
+      border-color: var(--color-primary-hover);
+    }
+
+    .cta-btn--secondary {
+      background: transparent;
+      color: var(--color-text);
+      border: 2px solid var(--color-border);
+    }
+
+    .cta-btn--secondary:hover {
+      border-color: var(--color-text);
+    }
+
     @media (max-width: 768px) {
       .features-grid { grid-template-columns: 1fr; }
       .landing-headline { font-size: 1.75rem; }
@@ -214,6 +256,10 @@
         Overlay real-time news, Twitter, and Reddit sentiment on top of options flow data.
         Spot divergences between where the market is positioned and what the crowd is saying.
       </p>
+      <div class="landing-cta">
+        <a href="#auth" class="cta-btn cta-btn--primary">Sign In</a>
+        <a href="/register" class="cta-btn cta-btn--secondary">Create Account</a>
+      </div>
     </header>
 
     <div class="features-grid">
@@ -250,7 +296,7 @@
       <span>yfinance</span>
     </div>
 
-    <div class="login-section">
+    <div class="login-section" id="auth">
       <div class="auth-card">
         <h2>Sign In</h2>
         <div class="auth-error" id="error"></div>
