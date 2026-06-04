@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 python-multipart
-yfinance
 pandas
 python-dotenv
 PyJWT

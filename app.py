@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
-from scraper import YahooRateLimitError
+from scraper import RateLimitError
 from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, _parse_chain
 from database import init_db, get_db, seconds_since
 from auth import create_user, authenticate, create_token, verify_token
@@ -19,8 +19,8 @@ import logging
 
 logger = logging.getLogger("heatmapper")
 
-# Throttle between tickers in a scan so we trickle requests to Yahoo instead of
-# bursting them all at once, which is what trips the per-IP rate limit.
+# Throttle between tickers in a scan so we trickle requests to the data provider
+# instead of bursting them all at once, which is what trips rate limits.
 SCAN_TICKER_DELAY = 2.0
 
 app = FastAPI(title="Options Heatmap")
@@ -32,10 +32,10 @@ def startup():
     init_db()
 
 
-@app.exception_handler(YahooRateLimitError)
-def rate_limit_handler(request: Request, exc: YahooRateLimitError):
-    # Surface Yahoo throttling as a real 429 (with Retry-After) instead of the
-    # confusing upstream 401, so clients can back off intelligently.
+@app.exception_handler(RateLimitError)
+def rate_limit_handler(request: Request, exc: RateLimitError):
+    # Surface upstream throttling as a real 429 (with Retry-After) so clients
+    # can back off intelligently instead of seeing a generic error.
     return JSONResponse(
         status_code=429,
         content={"detail": str(exc)},
@@ -221,7 +221,7 @@ def heatmap(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_heatmap(chains, metric)
-    except YahooRateLimitError:
+    except RateLimitError:
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -237,7 +237,7 @@ def probability(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_probability_heatmap(chains, near_pct=near_pct, band_width=band_width)
-    except YahooRateLimitError:
+    except RateLimitError:
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -252,7 +252,7 @@ def exposure(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_exposure_heatmap(chains, kind=kind)
-    except YahooRateLimitError:
+    except RateLimitError:
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -307,7 +307,7 @@ def divergence(ticker: str):
 
     try:
         chains = cached_fetch(ticker, 6)
-    except YahooRateLimitError:
+    except RateLimitError:
         raise
     except Exception:
         raise HTTPException(status_code=502, detail="Could not fetch options data")
