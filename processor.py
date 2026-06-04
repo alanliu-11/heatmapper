@@ -266,6 +266,11 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
 
 _CONTRACT_MULTIPLIER = 100
 
+# Dealer exposure concentrates near the money; far-OTM strikes carry ~0 gamma and
+# only add blank rows to the heatmap. Restrict the displayed strikes to this band
+# around spot so the chart focuses on where the exposure actually lives.
+_EXPOSURE_STRIKE_WINDOW = 0.15
+
 
 def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
     if kind not in ("gamma", "vanna"):
@@ -315,7 +320,8 @@ def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
                 target[(k, label)] = target.get((k, label), 0.0) + val
                 strikes_set.add(k)
 
-    strikes = sorted(strikes_set)
+    lo, hi = spot * (1 - _EXPOSURE_STRIKE_WINDOW), spot * (1 + _EXPOSURE_STRIKE_WINDOW)
+    strikes = sorted(k for k in strikes_set if lo <= k <= hi)
     expirations = sorted(labels_set)
 
     calls = [[call_map.get((k, lab), 0.0) for lab in expirations] for k in strikes]

@@ -552,12 +552,32 @@
         ? NET_LABELS[metric]
         : metric === "impliedVolatility" ? "Implied Volatility" : metric;
 
+      // GEX/VEX span many orders of magnitude (a few ATM strikes dwarf the rest),
+      // so a linear color scale washes everything to blank. Color on a signed-log
+      // scale (preserves sign for the diverging Net view) and keep the raw $
+      // values for the hover via customdata.
+      const isExposure = (metric === "gex" || metric === "vex");
+      let zColor = z, zScale = (_view === "net" ? { zmid: 0 } : {});
+      let customdata = null, hoverVal = formatHover(metric);
+      if (isExposure) {
+        const slog = v => Math.sign(v) * Math.log10(1 + Math.abs(v));
+        zColor = z.map(row => row.map(slog));
+        customdata = z;
+        hoverVal = "$%{customdata:,.0f}";
+        const m = Math.max(1, ...zColor.flat().map(Math.abs));
+        zScale = (_view === "net") ? { zmid: 0, zmin: -m, zmax: m } : { zmin: 0, zmax: m };
+      }
+
       const traces = [{
-        type: "heatmap", x: expirations, y: strikes, z,
+        type: "heatmap", x: expirations, y: strikes, z: zColor,
+        ...(customdata ? { customdata } : {}),
         colorscale: colorscaleFor(metric, _view), hoverongaps: false,
-        ...(_view === "net" ? { zmid: 0 } : {}),
-        colorbar: { title: label, tickfont: { color: t.secondaryColor }, titlefont: { color: t.secondaryColor } },
-        hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${formatHover(metric)}<extra></extra>`,
+        ...zScale,
+        colorbar: {
+          title: label, tickfont: { color: t.secondaryColor }, titlefont: { color: t.secondaryColor },
+          ...(isExposure ? { tickvals: [] } : {}),
+        },
+        hovertemplate: `Strike: %{y}<br>Expiry: %{x}<br>${label}: ${hoverVal}<extra></extra>`,
       }];
 
       if (spot_price != null) {
