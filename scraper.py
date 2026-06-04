@@ -1,157 +1,259 @@
-"""Options-chain fetching from Yahoo Finance, routed through BrightData.
+"""Options-chain fetching from the Questrade API.
 
-Yahoo's options endpoint hard-blocks datacenter IPs (the host this runs on), so
-we tunnel the requests through BrightData's residential network using the same
-account already configured for news scraping. Yahoo then sees a residential US
-IP instead of the datacenter IP.
+Questrade is a real, documented brokerage API (no datacenter-IP blocking, no
+scraping), so this replaces the Yahoo scraping that kept getting rate-limited.
+To leave the rest of the app untouched, the functions here adapt Questrade's
+responses back into the same chain-JSON shape `processor.py` consumes:
 
-Yahoo still requires a crumb+cookie handshake, and that pair is tied to the IP
-it was issued on. So we pin the whole session to ONE BrightData IP via a sticky
-session id (appended to the proxy username) — the crumb fetch and every option
-call go through the same exit node. Forcing a new session rotates to a fresh IP,
-which is how we self-heal from a stale crumb or a throttled exit node.
+    {"optionChain": {"result": [{
+        "expirationDates": [<unix ts>, ...],
+        "quote": {"regularMarketPrice": <spot>},
+        "options": [{"expirationDate": <unix ts>, "calls": [...], "puts": [...]}],
+    }]}}
 
-Env (already present for news scraping):
-    BRIGHTDATA_USER  e.g. brd-customer-<id>-zone-<zone>   (encodes the zone)
-    BRIGHTDATA_PASS
-Optional:
-    BRIGHTDATA_PROXY_HOST   default brd.superproxy.io:22225
-    BRIGHTDATA_COUNTRY      default us   (residential exit country)
-
-If BrightData creds are absent we fall back to a direct connection (which will
-likely be blocked on a datacenter host, but works locally).
+Auth (OAuth2 refresh-token flow):
+  - A manual refresh token bootstraps the first exchange (env QUESTRADE_REFRESH_TOKEN).
+  - Each exchange returns a short-lived access token + api_server, AND a NEW
+    refresh token. Questrade refresh tokens are single-use, so we persist the
+    rotated one in the DB (app_secrets) — the env var is only the bootstrap.
+  - A lock serialises refreshes so concurrent callers don't invalidate each
+    other's tokens.
 """
 
 import os
-import random
+import threading
 import time
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
 
+from database import get_secret, set_secret
+
 load_dotenv()
 
-BRIGHTDATA_USER = os.getenv("BRIGHTDATA_USER", "")
-BRIGHTDATA_PASS = os.getenv("BRIGHTDATA_PASS", "")
-BRIGHTDATA_PROXY_HOST = os.getenv("BRIGHTDATA_PROXY_HOST", "brd.superproxy.io:22225")
-BRIGHTDATA_COUNTRY = os.getenv("BRIGHTDATA_COUNTRY", "us")
+ENV_REFRESH_TOKEN = os.getenv("QUESTRADE_REFRESH_TOKEN", "")
+LOGIN_URL = "https://login.questrade.com/oauth2/token"
+REFRESH_SECRET_KEY = "questrade_refresh_token"
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json,text/plain,*/*",
-}
+# Batch size for the options-quotes endpoint (symbolIds per POST).
+_QUOTE_CHUNK = 100
 
-MAX_ATTEMPTS = 3
-BACKOFF_BASE = 0.5
-
-_session = None
-_crumb = None
+_lock = threading.Lock()
+_access_token = None
+_api_server = None
+_access_expiry = 0.0
 
 
 class RateLimitError(Exception):
-    """Yahoo is throttling/blocking us even through the proxy (401/403/429, or a
-    crumb endpoint that returns "Too Many Requests" instead of a token).
+    """Questrade is throttling us (HTTP 429). Surfaced as HTTP 429 by the API."""
 
-    Surfaced so the API layer can return a real 429 with Retry-After instead of
-    a confusing generic error.
+
+class QuestradeAuthError(RuntimeError):
+    """Questrade auth is unusable — typically an invalid/expired refresh token."""
+
+
+# --- Auth -----------------------------------------------------------------
+
+def _current_refresh_token() -> str:
+    # Prefer the rotated token persisted in the DB; fall back to the env
+    # bootstrap (used only on the very first exchange, or if the DB is absent).
+    try:
+        tok = get_secret(REFRESH_SECRET_KEY)
+    except Exception:
+        tok = None
+    return tok or ENV_REFRESH_TOKEN
+
+
+def _refresh_access_token():
+    """Exchange the refresh token for an access token; persist the rotated one.
+
+    Must be called with _lock held.
     """
+    global _access_token, _api_server, _access_expiry
 
-
-def _proxies() -> dict | None:
-    """Build a proxy dict pinned to one sticky BrightData exit IP.
-
-    The sticky session id keeps the crumb+cookie and the option calls on the
-    same residential IP; a new id (one per session) means a new exit node.
-    """
-    if not BRIGHTDATA_USER or not BRIGHTDATA_PASS:
-        return None
-    username = BRIGHTDATA_USER
-    if BRIGHTDATA_COUNTRY:
-        username += f"-country-{BRIGHTDATA_COUNTRY}"
-    username += f"-session-{random.randint(0, 1_000_000_000)}"
-    proxy_url = f"http://{username}:{BRIGHTDATA_PASS}@{BRIGHTDATA_PROXY_HOST}"
-    return {"http": proxy_url, "https": proxy_url}
-
-
-def _looks_like_valid_crumb(text: str) -> bool:
-    # A real crumb is a short token with no whitespace, e.g. "abc123XYZ".
-    # Throttle responses come back as prose like "Too Many Requests".
-    return bool(text) and not any(c.isspace() for c in text) and len(text) < 64
-
-
-def _ensure_session(force: bool = False):
-    global _session, _crumb
-    if _session is None or _crumb is None or force:
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        proxies = _proxies()
-        if proxies:
-            session.proxies.update(proxies)
-        # Prime cookies, then fetch the crumb — both through the same sticky IP.
-        session.get("https://fc.yahoo.com", timeout=20)
-        resp = session.get(
-            "https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=20
+    refresh_token = _current_refresh_token()
+    if not refresh_token:
+        raise QuestradeAuthError(
+            "No Questrade refresh token. Set QUESTRADE_REFRESH_TOKEN."
         )
-        crumb = resp.text.strip()
-        if resp.status_code != 200 or not _looks_like_valid_crumb(crumb):
-            raise RateLimitError(
-                "Yahoo refused to issue a crumb "
-                f"(status {resp.status_code}, body {crumb!r:.60}); "
-                "the exit IP is being rate-limited. Retry later."
-            )
-        _session, _crumb = session, crumb
-    return _session, _crumb
 
+    resp = requests.get(
+        LOGIN_URL,
+        params={"grant_type": "refresh_token", "refresh_token": refresh_token},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise QuestradeAuthError(
+            f"Questrade token refresh failed ({resp.status_code}). The refresh "
+            "token is likely invalid or already used — generate a new manual "
+            "token in the Questrade API centre and update QUESTRADE_REFRESH_TOKEN."
+        )
 
-def _invalidate_session():
-    global _session, _crumb
-    _session = None
-    _crumb = None
+    data = resp.json()
+    _access_token = data["access_token"]
+    _api_server = data["api_server"].rstrip("/")
+    # Refresh a minute early to avoid racing the expiry.
+    _access_expiry = time.time() + data.get("expires_in", 1800) - 60
 
-
-def fetch_options_chain(ticker: str, expiry_timestamp: int = None) -> dict:
-    url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker.upper()}"
-
-    # Retry with exponential backoff. On an auth/throttle failure, rotate to a
-    # fresh sticky session (new exit IP + new crumb) and try again so a stale
-    # crumb or a flagged exit node self-heals.
-    last_exc = None
-    for attempt in range(MAX_ATTEMPTS):
-        if attempt > 0:
-            time.sleep(BACKOFF_BASE * (2 ** (attempt - 1)))
+    new_refresh = data.get("refresh_token")
+    if new_refresh:
         try:
-            session, crumb = _ensure_session(force=attempt > 0)
-        except RateLimitError as e:
-            last_exc = e
-            continue
+            set_secret(REFRESH_SECRET_KEY, new_refresh)
+        except Exception:
+            # If we can't persist (e.g. no DB locally), the in-memory access
+            # token still works until it expires; only restarts are affected.
+            pass
 
-        params = {"crumb": crumb}
-        if expiry_timestamp:
-            params["date"] = expiry_timestamp
-        resp = session.get(url, params=params, timeout=30)
 
-        if resp.status_code in (401, 403, 429):
-            last_exc = RateLimitError(
-                f"Yahoo returned {resp.status_code} for {ticker.upper()} "
-                "through the proxy; the exit IP is likely rate-limited. "
-                "Retry later."
-            )
-            _invalidate_session()
-            continue
+def _ensure_access():
+    """Return a valid (access_token, api_server), refreshing if needed.
 
-        resp.raise_for_status()
-        return resp.json()
+    Must be called with _lock held.
+    """
+    if _access_token is None or time.time() >= _access_expiry:
+        _refresh_access_token()
+    return _access_token, _api_server
 
-    raise last_exc
+
+def _request(method: str, path: str, *, params=None, json=None) -> dict:
+    with _lock:
+        token, server = _ensure_access()
+
+    url = f"{server}/{path.lstrip('/')}"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.request(
+        method, url, params=params, json=json, headers=headers, timeout=30
+    )
+
+    if resp.status_code == 401:
+        # Access token went stale early — force one refresh and retry.
+        with _lock:
+            _refresh_access_token()
+            token, server = _access_token, _api_server
+        url = f"{server}/{path.lstrip('/')}"
+        resp = requests.request(
+            method, url, params=params, json=json,
+            headers={"Authorization": f"Bearer {token}"}, timeout=30,
+        )
+
+    if resp.status_code == 429:
+        raise RateLimitError("Questrade rate limit (429). Retry later.")
+    resp.raise_for_status()
+    return resp.json()
+
+
+# --- Data -----------------------------------------------------------------
+
+def _resolve_symbol_id(ticker: str) -> int:
+    data = _request("GET", "v1/symbols/search", params={"prefix": ticker})
+    symbols = data.get("symbols", [])
+    for s in symbols:
+        if s.get("symbol", "").upper() == ticker.upper():
+            return s["symbolId"]
+    if symbols:
+        return symbols[0]["symbolId"]
+    raise ValueError(f"Questrade: symbol '{ticker}' not found.")
+
+
+def _get_spot(symbol_id: int) -> float | None:
+    data = _request("GET", f"v1/markets/quotes/{symbol_id}")
+    quotes = data.get("quotes", [])
+    if not quotes:
+        return None
+    q = quotes[0]
+    for key in ("lastTradePrice", "lastTradePriceTrHrs", "closePrice"):
+        v = q.get(key)
+        if v:
+            return float(v)
+    return None
+
+
+def _iso_to_ts(iso: str) -> int:
+    """Questrade expiry like '2026-06-20T00:00:00.000000-04:00' -> unix seconds."""
+    return int(datetime.fromisoformat(iso).timestamp())
+
+
+def _normalize_iv(volatility) -> float | None:
+    """Questrade reports implied volatility as a percent (e.g. 23.45), while the
+    processor expects a decimal (0.2345). IVs as decimals are <~5 and as percent
+    are >~5, so divide when it's clearly a percentage."""
+    if volatility is None:
+        return None
+    v = float(volatility)
+    if v <= 0:
+        return None
+    return v / 100.0 if v > 5 else v
 
 
 def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
-    base = fetch_options_chain(ticker)
-    result = base["optionChain"]["result"][0]
-    expiry_timestamps = result["expirationDates"][:max_expirations]
+    ticker = ticker.upper()
+    symbol_id = _resolve_symbol_id(ticker)
+    spot = _get_spot(symbol_id)
 
-    chains = [base]
-    for ts in expiry_timestamps[1:]:
-        chains.append(fetch_options_chain(ticker, ts))
+    chain = _request("GET", f"v1/symbols/{symbol_id}/options").get("optionChain", [])
+    if not chain:
+        raise ValueError(f"No options found for {ticker}.")
+
+    # Each optionChain entry is one expiry. Build, per expiry, a map of
+    # symbolId -> (strike, side) so we can join the quote data back by id.
+    expiries = chain[:max_expirations]
+    all_expiry_ts = [_iso_to_ts(e["expiryDate"]) for e in chain]
+
+    per_expiry = []   # list of (expiry_ts, {symbolId: (strike, side)})
+    all_ids: list[int] = []
+    for entry in expiries:
+        exp_ts = _iso_to_ts(entry["expiryDate"])
+        id_map: dict[int, tuple[float, str]] = {}
+        for root in entry.get("chainPerRoot", []):
+            for s in root.get("chainPerStrikePrice", []):
+                strike = s.get("strikePrice")
+                if s.get("callSymbolId"):
+                    id_map[s["callSymbolId"]] = (strike, "calls")
+                    all_ids.append(s["callSymbolId"])
+                if s.get("putSymbolId"):
+                    id_map[s["putSymbolId"]] = (strike, "puts")
+                    all_ids.append(s["putSymbolId"])
+        per_expiry.append((exp_ts, id_map))
+
+    # Batch-fetch quotes for every option id, keyed by symbolId.
+    quotes_by_id: dict[int, dict] = {}
+    for i in range(0, len(all_ids), _QUOTE_CHUNK):
+        batch = all_ids[i : i + _QUOTE_CHUNK]
+        data = _request("POST", "v1/markets/quotes/options", json={"optionIds": batch})
+        for q in data.get("optionQuotes", []):
+            quotes_by_id[q["symbolId"]] = q
+
+    chains = []
+    for exp_ts, id_map in per_expiry:
+        calls, puts = [], []
+        for sym_id, (strike, side) in id_map.items():
+            q = quotes_by_id.get(sym_id)
+            if not q:
+                continue
+            rec = {
+                "strike": strike,
+                "openInterest": q.get("openInterest") or 0,
+                "volume": q.get("volume") or 0,
+                "impliedVolatility": _normalize_iv(q.get("volatility")),
+                "expiration": exp_ts,
+            }
+            (calls if side == "calls" else puts).append(rec)
+
+        chains.append(
+            {
+                "optionChain": {
+                    "result": [
+                        {
+                            "expirationDates": all_expiry_ts,
+                            "quote": {"regularMarketPrice": spot},
+                            "options": [
+                                {"expirationDate": exp_ts, "calls": calls, "puts": puts}
+                            ],
+                        }
+                    ]
+                }
+            }
+        )
 
     return chains

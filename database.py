@@ -97,6 +97,11 @@ _SCHEMA = [
         created_at TIMESTAMPTZ DEFAULT now(),
         UNIQUE(user_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS app_secrets (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_news_ticker ON news(ticker)",
     "CREATE INDEX IF NOT EXISTS idx_news_fetched ON news(fetched_at)",
     "CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON watchlist(user_id)",
@@ -110,6 +115,32 @@ def init_db():
     try:
         for stmt in _SCHEMA:
             conn.execute(stmt)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_secret(key: str) -> str | None:
+    """Read a value from the app_secrets key/value store (None if absent)."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_secrets WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+    finally:
+        conn.close()
+
+
+def set_secret(key: str, value: str) -> None:
+    """Upsert a value into the app_secrets key/value store."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, now()) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+            (key, value),
+        )
         conn.commit()
     finally:
         conn.close()
