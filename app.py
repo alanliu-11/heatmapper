@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
+from scraper import YahooRateLimitError
 from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, _parse_chain
 from database import init_db, get_db, seconds_since
 from auth import create_user, authenticate, create_token, verify_token
@@ -13,9 +14,14 @@ from typing import Literal
 import psycopg
 import json
 import asyncio
+import time
 import logging
 
 logger = logging.getLogger("heatmapper")
+
+# Throttle between tickers in a scan so we trickle requests to Yahoo instead of
+# bursting them all at once, which is what trips the per-IP rate limit.
+SCAN_TICKER_DELAY = 2.0
 
 app = FastAPI(title="Options Heatmap")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -24,6 +30,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.on_event("startup")
 def startup():
     init_db()
+
+
+@app.exception_handler(YahooRateLimitError)
+def rate_limit_handler(request: Request, exc: YahooRateLimitError):
+    # Surface Yahoo throttling as a real 429 (with Retry-After) instead of the
+    # confusing upstream 401, so clients can back off intelligently.
+    return JSONResponse(
+        status_code=429,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "60"},
+    )
 
 
 # --- Auth helpers ---
@@ -204,6 +221,8 @@ def heatmap(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_heatmap(chains, metric)
+    except YahooRateLimitError:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -218,6 +237,8 @@ def probability(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_probability_heatmap(chains, near_pct=near_pct, band_width=band_width)
+    except YahooRateLimitError:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -231,6 +252,8 @@ def exposure(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_exposure_heatmap(chains, kind=kind)
+    except YahooRateLimitError:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -284,6 +307,8 @@ def divergence(ticker: str):
 
     try:
         chains = cached_fetch(ticker, 6)
+    except YahooRateLimitError:
+        raise
     except Exception:
         raise HTTPException(status_code=502, detail="Could not fetch options data")
 
@@ -690,7 +715,9 @@ def _scan_and_notify() -> list[dict]:
 
     alerts = []
     divergences = {}
-    for ticker in all_tickers:
+    for i, ticker in enumerate(all_tickers):
+        if i > 0:
+            time.sleep(SCAN_TICKER_DELAY)
         d = _compute_divergence(ticker)
         if d:
             divergences[ticker] = d
@@ -726,7 +753,9 @@ def scan_watchlist(request: Request):
         return {"alerts": [], "message": "No tickers in watchlist"}
 
     alerts = []
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
+        if i > 0:
+            time.sleep(SCAN_TICKER_DELAY)
         d = _compute_divergence(ticker)
         if d:
             alerts.append(d)
@@ -753,7 +782,10 @@ async def _background_scanner():
     while True:
         await asyncio.sleep(15 * 60)
         try:
-            alerts = _scan_and_notify()
+            # Run in a worker thread: the scan does blocking network I/O and now
+            # sleeps between tickers, so calling it inline would freeze the event
+            # loop (and every other request) for the duration of the scan.
+            alerts = await asyncio.to_thread(_scan_and_notify)
             if alerts:
                 logger.info(f"Background scan found {len(alerts)} divergences")
         except Exception as e:
