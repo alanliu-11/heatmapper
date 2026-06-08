@@ -187,12 +187,21 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
     if not per_expiry:
         raise ValueError("No valid implied volatility data to build probability heatmap.")
 
-    # Price-band grid spanning ±near_pct around spot. Per-expiry bands that fall
-    # outside each expiry's quoted strike range are zeroed before normalising,
-    # so the grid stays stable across tickers regardless of IV coverage width.
-    lo_price = max(math.floor(spot * (1 - near_pct) / band_width) * band_width, band_width)
-    hi_price = math.ceil(spot * (1 + near_pct) / band_width) * band_width
-    n_bands = int(round((hi_price - lo_price) / band_width))
+    # Grid: covers the union of quoted strike ranges across all expiries (so no
+    # column is ever wider than the data), capped at ±near_pct from spot, with a
+    # hard ±15% floor so a narrow quoted range (e.g. a single-name ticker where
+    # Questrade returns few strikes) doesn't collapse the grid to just a few bands.
+    all_ks   = [k for _, _, ks, _ in per_expiry for k in ks]
+    _FLOOR   = 0.15
+    lo_cand  = math.floor(min(all_ks)           / band_width) * band_width
+    lo_cap   = math.floor(spot * (1 - near_pct) / band_width) * band_width
+    lo_floor = math.floor(spot * (1 - _FLOOR)   / band_width) * band_width
+    hi_cand  = math.ceil(max(all_ks)            / band_width) * band_width
+    hi_cap   = math.ceil(spot * (1 + near_pct)  / band_width) * band_width
+    hi_floor = math.ceil(spot * (1 + _FLOOR)    / band_width) * band_width
+    lo_price = max(band_width, min(max(lo_cand, lo_cap), lo_floor))
+    hi_price = max(hi_floor, min(hi_cand, hi_cap))
+    n_bands  = int(round((hi_price - lo_price) / band_width))
     if n_bands < 1:
         raise ValueError("Band width too large for the selected range.")
     edges = [lo_price + i * band_width for i in range(n_bands + 1)]
@@ -219,16 +228,19 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
             return (up - dn) / (2.0 * h)
 
         d = disc(t)
-        # Zero out bands outside this expiry's quoted strike range; those would
-        # rely on flat-clamped wing IVs (np.interp extrapolation) which produce
-        # artefact probability mass at extreme prices.
+        # Only compute density where BOTH band edges are within the quoted strike
+        # range. The centre-check allowed the outermost included band to use one
+        # extrapolated (flat-clamped) edge in c_prime, biasing the finite-difference
+        # slope and dumping artefact mass at the boundary.
         col = [
             max(d * (c_prime(edges[i + 1]) - c_prime(edges[i])), 0.0)
-            if k_lo <= strikes[i] <= k_hi else 0.0
+            if edges[i] >= k_lo and edges[i + 1] <= k_hi else 0.0
             for i in range(len(strikes))
         ]
         total = sum(col)
-        col = [100.0 * p / total for p in col] if total > 0 else [0.0] * len(strikes)
+        if total == 0:
+            continue  # no quoted strikes overlap this expiry's grid — skip the column
+        col = [100.0 * p / total for p in col]
 
         # Weighted-average predicted price: each band's midpoint price times its
         # probability (col is in %, so divide by 100), summed over all bands.
