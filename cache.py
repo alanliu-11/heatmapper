@@ -3,12 +3,13 @@ from scraper import fetch_all_expirations
 
 TTL = 15 * 60  # 15 minutes
 
-_store: dict[str, tuple[float, list]] = {}
+_store: dict[tuple[str, int], tuple[float, list]] = {}
 
 
 def cached_fetch(ticker: str, max_expirations: int = 6) -> list:
     ticker = ticker.upper()
-    entry = _store.get(ticker)
+    key = (ticker, max_expirations)
+    entry = _store.get(key)
 
     if entry is not None:
         timestamp, data = entry
@@ -16,12 +17,14 @@ def cached_fetch(ticker: str, max_expirations: int = 6) -> list:
             return data
 
     data = fetch_all_expirations(ticker, max_expirations)
-    _store[ticker] = (time.time(), data)
+    _store[key] = (time.time(), data)
     return data
 
 
 def invalidate(ticker: str) -> None:
-    _store.pop(ticker.upper(), None)
+    ticker = ticker.upper()
+    for key in [k for k in _store if k[0] == ticker]:
+        del _store[key]
 
 
 def invalidate_all() -> None:
