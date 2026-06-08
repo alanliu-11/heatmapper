@@ -156,17 +156,25 @@ def _resolve_symbol_id(ticker: str) -> int:
     raise ValueError(f"Questrade: symbol '{ticker}' not found.")
 
 
-def _get_spot(symbol_id: int) -> float | None:
+def _get_spot(symbol_id: int) -> tuple[float | None, float | None]:
+    """Return (current_price, prev_close). prev_close is yesterday's closing price."""
     data = _request("GET", f"v1/markets/quotes/{symbol_id}")
     quotes = data.get("quotes", [])
     if not quotes:
-        return None
+        return None, None
     q = quotes[0]
+    spot = None
     for key in ("lastTradePrice", "lastTradePriceTrHrs", "closePrice"):
         v = q.get(key)
         if v:
-            return float(v)
-    return None
+            spot = float(v)
+            break
+    prev_close = q.get("closePrice")
+    prev_close = float(prev_close) if prev_close else None
+    # If spot fell back to closePrice there's no meaningful day-change to show.
+    if spot == prev_close:
+        prev_close = None
+    return spot, prev_close
 
 
 def _iso_to_ts(iso: str) -> int:
@@ -177,19 +185,25 @@ def _iso_to_ts(iso: str) -> int:
 def _normalize_iv(volatility) -> float | None:
     """Questrade reports implied volatility as a percent (e.g. 23.45), while the
     processor expects a decimal (0.2345). IVs as decimals are <~5 and as percent
-    are >~5, so divide when it's clearly a percentage."""
+    are >~5, so divide when it's clearly a percentage.
+
+    The threshold-5 heuristic breaks for IVs between 1-5% reported as a percent
+    (e.g. 4.9 stays 4.9 = 490% in decimal). The post-normalization bounds check
+    catches those and any other obviously corrupt values from the API."""
     if volatility is None:
         return None
     v = float(volatility)
     if v <= 0:
         return None
-    return v / 100.0 if v > 5 else v
+    normalized = v / 100.0 if v > 5 else v
+    # Reject anything outside 1%–500% annualised vol — implausible in any market.
+    return normalized if 0.01 <= normalized <= 5.0 else None
 
 
 def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
     ticker = ticker.upper()
     symbol_id = _resolve_symbol_id(ticker)
-    spot = _get_spot(symbol_id)
+    spot, prev_close = _get_spot(symbol_id)
 
     chain = _request("GET", f"v1/symbols/{symbol_id}/options").get("optionChain", [])
     if not chain:
@@ -246,7 +260,7 @@ def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
                     "result": [
                         {
                             "expirationDates": all_expiry_ts,
-                            "quote": {"regularMarketPrice": spot},
+                            "quote": {"regularMarketPrice": spot, "previousClose": prev_close},
                             "options": [
                                 {"expirationDate": exp_ts, "calls": calls, "puts": puts}
                             ],

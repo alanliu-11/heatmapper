@@ -84,8 +84,8 @@
         </div>
 
         <div class="input-group--inline">
-          <label class="input-label" for="expirations">Exp</label>
-          <input class="input-field" id="expirations" type="number" value="6" min="1" max="12" style="width:55px" />
+          <label class="input-label" for="expirations" title="Number of expiration dates to load (more = wider chart, slower load)">Dates</label>
+          <input class="input-field" id="expirations" type="number" value="6" min="1" max="12" style="width:55px" title="Number of expiration dates to load (more = wider chart, slower load)" />
         </div>
 
         <div class="input-group--inline" id="band-group">
@@ -372,8 +372,6 @@
       if (_data) load();
     }
 
-    let _prevPrice = null;
-
     function updateSidebar(data) {
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
       const metric = document.getElementById("metric").value;
@@ -386,16 +384,20 @@
       if (data.spot_price != null) {
         priceEl.textContent = `$${data.spot_price.toFixed(2)}`;
 
-        if (_prevPrice != null && _prevPrice !== data.spot_price) {
-          const diff = data.spot_price - _prevPrice;
-          const pct = ((diff / _prevPrice) * 100).toFixed(2);
+        if (data.prev_close != null && data.prev_close > 0) {
+          const diff = data.spot_price - data.prev_close;
+          const pct = ((diff / data.prev_close) * 100).toFixed(2);
           const isUp = diff >= 0;
           changeEl.className = `spot-change ${isUp ? 'spot-change--up' : 'spot-change--down'}`;
           changeEl.textContent = `${isUp ? '+' : ''}${pct}%`;
+        } else {
+          changeEl.className = 'spot-change';
+          changeEl.textContent = '';
         }
-        _prevPrice = data.spot_price;
       } else {
         priceEl.textContent = "--";
+        changeEl.className = 'spot-change';
+        changeEl.textContent = '';
       }
 
       document.getElementById("stat-expirations").textContent = data.expirations.length;
