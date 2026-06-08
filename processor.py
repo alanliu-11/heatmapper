@@ -184,20 +184,14 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
         label = datetime.utcfromtimestamp(expiry_ts).strftime("%Y-%m-%d")
         per_expiry.append((label, t, ks, ivs))
 
-    # Clamp the price grid to the union of quoted strike ranges so the grid
-    # never extends into regions where we'd have to extrapolate the IV smile.
-    all_quoted_ks = [k for _, _, ks, _ in per_expiry for k in ks]
-    if not all_quoted_ks:
+    if not per_expiry:
         raise ValueError("No valid implied volatility data to build probability heatmap.")
-    lo_price = max(
-        math.floor(spot * (1 - near_pct) / band_width) * band_width,
-        math.floor(min(all_quoted_ks) / band_width) * band_width,
-        band_width,
-    )
-    hi_price = min(
-        math.ceil(spot * (1 + near_pct) / band_width) * band_width,
-        math.ceil(max(all_quoted_ks) / band_width) * band_width,
-    )
+
+    # Price-band grid spanning ±near_pct around spot. Per-expiry bands that fall
+    # outside each expiry's quoted strike range are zeroed before normalising,
+    # so the grid stays stable across tickers regardless of IV coverage width.
+    lo_price = max(math.floor(spot * (1 - near_pct) / band_width) * band_width, band_width)
+    hi_price = math.ceil(spot * (1 + near_pct) / band_width) * band_width
     n_bands = int(round((hi_price - lo_price) / band_width))
     if n_bands < 1:
         raise ValueError("Band width too large for the selected range.")
