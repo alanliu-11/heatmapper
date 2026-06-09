@@ -60,12 +60,9 @@ def build_heatmap(chains: list[dict], metric: str = "openInterest") -> dict:
     puts_pivot  = puts_pivot.reindex(index=strikes, columns=expirations, fill_value=0)
 
     try:
-        quote = chains[0]["optionChain"]["result"][0]["quote"]
-        spot_price = quote.get("regularMarketPrice")
-        prev_close = quote.get("previousClose")
+        spot_price = chains[0]["optionChain"]["result"][0]["quote"]["regularMarketPrice"]
     except (KeyError, IndexError):
         spot_price = None
-        prev_close = None
 
     return {
         "strikes":     strikes,
@@ -74,7 +71,6 @@ def build_heatmap(chains: list[dict], metric: str = "openInterest") -> dict:
         "puts":        puts_pivot.values.tolist(),
         "metric":      metric,
         "spot_price":  spot_price,
-        "prev_close":  prev_close,
     }
 
 
@@ -141,27 +137,12 @@ def _bs_vanna(s: float, k: float, sigma: float, t: float,
 # tails instead of a symmetric lognormal. Each column is normalized to 100 (%).
 # ---------------------------------------------------------------------------
 
-def _ln_band_prob(spot: float, a: float, b: float,
-                  sigma: float, t: float,
-                  r: float = RISK_FREE_RATE) -> float:
-    """Lognormal P(a < S_T < b) for tail extrapolation beyond quoted strikes."""
-    if sigma <= 0 or t <= 0 or spot <= 0 or a <= 0 or b <= 0:
-        return 0.0
-    sqrt_t = math.sqrt(t)
-    drift = (r - 0.5 * sigma * sigma) * t
-    z = lambda k: (math.log(k / spot) - drift) / (sigma * sqrt_t)
-    return max(_norm_cdf(z(b)) - _norm_cdf(z(a)), 0.0)
-
-
 def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
                               band_width: float = 5.0) -> dict:
     try:
-        quote = chains[0]["optionChain"]["result"][0]["quote"]
-        spot = quote.get("regularMarketPrice")
-        prev_close = quote.get("previousClose")
+        spot = chains[0]["optionChain"]["result"][0]["quote"]["regularMarketPrice"]
     except (KeyError, IndexError):
         spot = None
-        prev_close = None
     if not spot or spot <= 0:
         raise ValueError("Spot price unavailable; cannot build probability distribution.")
 
@@ -196,24 +177,12 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
         label = datetime.utcfromtimestamp(expiry_ts).strftime("%Y-%m-%d")
         per_expiry.append((label, t, ks, ivs))
 
-    if not per_expiry:
-        raise ValueError("No valid implied volatility data to build probability heatmap.")
-
-    # Grid: covers the union of quoted strike ranges across all expiries (so no
-    # column is ever wider than the data), capped at ±near_pct from spot, with a
-    # hard ±15% floor so a narrow quoted range (e.g. a single-name ticker where
-    # Questrade returns few strikes) doesn't collapse the grid to just a few bands.
-    all_ks   = [k for _, _, ks, _ in per_expiry for k in ks]
-    _FLOOR   = 0.15
-    lo_cand  = math.floor(min(all_ks)           / band_width) * band_width
-    lo_cap   = math.floor(spot * (1 - near_pct) / band_width) * band_width
-    lo_floor = math.floor(spot * (1 - _FLOOR)   / band_width) * band_width
-    hi_cand  = math.ceil(max(all_ks)            / band_width) * band_width
-    hi_cap   = math.ceil(spot * (1 + near_pct)  / band_width) * band_width
-    hi_floor = math.ceil(spot * (1 + _FLOOR)    / band_width) * band_width
-    lo_price = max(band_width, min(max(lo_cand, lo_cap), lo_floor))
-    hi_price = max(hi_floor, min(hi_cand, hi_cap))
-    n_bands  = int(round((hi_price - lo_price) / band_width))
+    # regular price-band grid spanning ±near_pct around spot; each row is a
+    # band of width `band_width` and probability is integrated over the band.
+    lo_price = math.floor(spot * (1 - near_pct) / band_width) * band_width
+    hi_price = math.ceil(spot * (1 + near_pct) / band_width) * band_width
+    lo_price = max(lo_price, band_width)
+    n_bands = int(round((hi_price - lo_price) / band_width))
     if n_bands < 1:
         raise ValueError("Band width too large for the selected range.")
     edges = [lo_price + i * band_width for i in range(n_bands + 1)]
@@ -231,37 +200,22 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
         if len(ks) < 2:
             continue  # need at least two strikes to define a smile
 
-        k_lo, k_hi = min(ks), max(ks)
+        # IV interpolated along the smile (np.interp clamps beyond the wings).
         iv_at = lambda k: float(np.interp(k, ks, ivs))
 
         def c_prime(k: float) -> float:
+            """dC/dK via central difference, each leg priced at its smile IV."""
             up = _bs_call_price(spot, k + h, iv_at(k + h), t)
             dn = _bs_call_price(spot, k - h, iv_at(k - h), t)
             return (up - dn) / (2.0 * h)
 
         d = disc(t)
-        iv_lo = ivs[0]   # edge IV for left tail
-        iv_hi = ivs[-1]  # edge IV for right tail
-        col = []
-        for i in range(len(strikes)):
-            a, b = edges[i], edges[i + 1]
-            if a >= k_lo and b <= k_hi:
-                # Fully inside quoted range: Breeden-Litzenberger density
-                p = max(d * (c_prime(b) - c_prime(a)), 0.0)
-            elif b <= k_lo:
-                # Entirely in left tail: lognormal with edge IV
-                p = _ln_band_prob(spot, a, b, iv_lo, t)
-            elif a >= k_hi:
-                # Entirely in right tail: lognormal with edge IV
-                p = _ln_band_prob(spot, a, b, iv_hi, t)
-            else:
-                # Boundary band straddles k_lo or k_hi: lognormal with nearest edge IV
-                p = _ln_band_prob(spot, a, b, iv_lo if a < k_lo else iv_hi, t)
-            col.append(p)
+        col = [
+            max(d * (c_prime(edges[i + 1]) - c_prime(edges[i])), 0.0)
+            for i in range(len(strikes))
+        ]
         total = sum(col)
-        if total == 0:
-            continue  # no quoted strikes overlap this expiry's grid — skip the column
-        col = [100.0 * p / total for p in col]
+        col = [100.0 * p / total for p in col] if total > 0 else [0.0] * len(strikes)
 
         # Weighted-average predicted price: each band's midpoint price times its
         # probability (col is in %, so divide by 100), summed over all bands.
@@ -282,7 +236,6 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
         "probabilities":   probabilities,
         "expected_prices": expected_prices,
         "spot_price":      spot,
-        "prev_close":      prev_close,
         "metric":          "probability",
     }
 
@@ -324,12 +277,9 @@ def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
         raise ValueError("kind must be 'gamma' or 'vanna'")
 
     try:
-        quote = chains[0]["optionChain"]["result"][0]["quote"]
-        spot = quote.get("regularMarketPrice")
-        prev_close = quote.get("previousClose")
+        spot = chains[0]["optionChain"]["result"][0]["quote"]["regularMarketPrice"]
     except (KeyError, IndexError):
         spot = None
-        prev_close = None
     if not spot or spot <= 0:
         raise ValueError("Spot price unavailable; cannot build exposure heatmap.")
 
@@ -384,5 +334,4 @@ def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
         "puts":        puts,
         "metric":      "gex" if kind == "gamma" else "vex",
         "spot_price":  spot,
-        "prev_close":  prev_close,
     }
