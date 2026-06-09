@@ -335,3 +335,184 @@ def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
         "metric":      "gex" if kind == "gamma" else "vex",
         "spot_price":  spot,
     }
+
+
+def build_levels_analysis(chains: list[dict]) -> dict:
+    """Aggregate net GEX/VEX per strike and derive structural levels and regime summary."""
+    try:
+        spot = chains[0]["optionChain"]["result"][0]["quote"]["regularMarketPrice"]
+    except (KeyError, IndexError):
+        spot = None
+    if not spot or spot <= 0:
+        raise ValueError("Spot price unavailable; cannot build levels analysis.")
+
+    now = datetime.utcnow().timestamp()
+    gex_raw: dict[float, float] = {}
+    vex_raw: dict[float, float] = {}
+
+    for chain in chains:
+        result = chain["optionChain"]["result"][0]
+        opt = result["options"][0]
+        expiry_ts = opt.get("expirationDate")
+        if expiry_ts is None:
+            continue
+        t = max((expiry_ts - now) / _SECONDS_PER_YEAR, 1.0 / _SECONDS_PER_YEAR)
+
+        for side, sign in (("calls", 1), ("puts", -1)):
+            for o in opt.get(side, []):
+                k = o.get("strike")
+                iv = o.get("impliedVolatility")
+                oi = o.get("openInterest") or 0
+                if k is None or iv is None or iv <= 0 or oi <= 0:
+                    continue
+                g = _bs_gamma(spot, k, iv, t) * oi * _CONTRACT_MULTIPLIER * spot * spot * 0.01
+                v = _bs_vanna(spot, k, iv, t) * oi * _CONTRACT_MULTIPLIER * spot * 0.01
+                gex_raw[k] = gex_raw.get(k, 0.0) + sign * g
+                vex_raw[k] = vex_raw.get(k, 0.0) + sign * v
+
+    lo = spot * (1 - _EXPOSURE_STRIKE_WINDOW)
+    hi = spot * (1 + _EXPOSURE_STRIKE_WINDOW)
+    strikes = sorted(k for k in gex_raw if lo <= k <= hi)
+    if not strikes:
+        raise ValueError("No strikes in exposure window.")
+
+    net_gex_arr = [round(gex_raw[k]) for k in strikes]
+    net_vex_arr = [round(vex_raw.get(k, 0.0)) for k in strikes]
+    gex_vex_diff = [g - v for g, v in zip(net_gex_arr, net_vex_arr)]
+
+    gex = dict(zip(strikes, net_gex_arr))
+    vex_d = dict(zip(strikes, net_vex_arr))
+
+    above = [k for k in strikes if k > spot]
+    below = [k for k in strikes if k < spot]
+
+    pos_above = sorted(((k, gex[k]) for k in above if gex[k] > 0), key=lambda x: -x[1])
+    pos_below = sorted(((k, gex[k]) for k in below if gex[k] > 0), key=lambda x: -x[1])
+
+    call_wall     = {"strike": pos_above[0][0], "gex": pos_above[0][1]} if pos_above else None
+    sec_call_wall = {"strike": pos_above[1][0], "gex": pos_above[1][1]} if len(pos_above) > 1 else None
+    put_wall      = {"strike": pos_below[0][0], "gex": pos_below[0][1]} if pos_below else None
+    sec_put_wall  = {"strike": pos_below[1][0], "gex": pos_below[1][1]} if len(pos_below) > 1 else None
+
+    # Gamma Flip: adjacent pair with sign change closest to spot
+    gamma_flip = None
+    best_dist = float("inf")
+    for i in range(len(strikes) - 1):
+        g0, g1 = gex[strikes[i]], gex[strikes[i + 1]]
+        if g0 * g1 < 0:
+            s0, s1 = strikes[i], strikes[i + 1]
+            closer = s0 if abs(s0 - spot) < abs(s1 - spot) else s1
+            d = abs(closer - spot)
+            if d < best_dist:
+                best_dist = d
+                gamma_flip = {"strike": closer, "gex": gex[closer]}
+
+    cw_s = call_wall["strike"] if call_wall else hi
+    pw_s = put_wall["strike"]  if put_wall  else lo
+    accel_above = [{"strike": k, "gex": gex[k]} for k in above if k < cw_s and gex[k] < 0]
+    accel_below = [{"strike": k, "gex": gex[k]} for k in below if k > pw_s and gex[k] < 0]
+
+    near_lo, near_hi = spot * 0.97, spot * 1.03
+    near = [k for k in strikes if near_lo <= k <= near_hi]
+
+    pos_near_vex = sorted(((k, vex_d[k]) for k in near if vex_d[k] > 0), key=lambda x: -x[1])
+    neg_near_vex = sorted(((k, vex_d[k]) for k in near if vex_d[k] < 0), key=lambda x:  x[1])
+    all_pos_vex  = sorted(((k, vex_d[k]) for k in strikes if vex_d[k] > 0), key=lambda x: -x[1])
+
+    vex_magnet      = {"strike": pos_near_vex[0][0], "vex": pos_near_vex[0][1]} if pos_near_vex else None
+    vex_repellent   = {"strike": neg_near_vex[0][0], "vex": neg_near_vex[0][1]} if neg_near_vex else None
+    vex_drift_target = {"strike": all_pos_vex[0][0], "vex": all_pos_vex[0][1]} if all_pos_vex else None
+
+    # Regime
+    if gamma_flip:
+        above_flip    = spot > gamma_flip["strike"]
+        spot_vs_flip  = "above" if above_flip else "below"
+        regime_label  = "stable" if above_flip else "volatile"
+    else:
+        near_avg_gex = sum(gex.get(k, 0) for k in near) / len(near) if near else 0
+        regime_label = "stable" if near_avg_gex > 0 else "volatile"
+        spot_vs_flip = "above" if near_avg_gex > 0 else "below"
+
+    if near:
+        gex_bull = sum(1 for k in near if gex.get(k, 0) > 0) > len(near) / 2
+        vex_bull = sum(1 for k in near if vex_d.get(k, 0) > 0) > len(near) / 2
+        gex_vex_agree = gex_bull == vex_bull
+    else:
+        gex_vex_agree = None
+
+    # Top 3 levels by proximity-weighted magnitude
+    pool = []
+    if call_wall:       pool.append({**call_wall,    "label": "Call Wall",       "vex": vex_d.get(call_wall["strike"], 0)})
+    if put_wall:        pool.append({**put_wall,     "label": "Put Wall",        "vex": vex_d.get(put_wall["strike"], 0)})
+    if gamma_flip:      pool.append({**gamma_flip,   "label": "Gamma Flip",      "vex": vex_d.get(gamma_flip["strike"], 0)})
+    if sec_call_wall:   pool.append({**sec_call_wall,"label": "2nd Call Wall",   "vex": vex_d.get(sec_call_wall["strike"], 0)})
+    if sec_put_wall:    pool.append({**sec_put_wall, "label": "2nd Put Wall",    "vex": vex_d.get(sec_put_wall["strike"], 0)})
+    if vex_magnet:      pool.append({"strike": vex_magnet["strike"],    "label": "VEX Magnet",    "gex": gex.get(vex_magnet["strike"], 0),    "vex": vex_magnet["vex"]})
+    if vex_repellent:   pool.append({"strike": vex_repellent["strike"], "label": "VEX Repellent", "gex": gex.get(vex_repellent["strike"], 0), "vex": vex_repellent["vex"]})
+
+    seen_s: set[float] = set()
+    deduped = []
+    for lvl in pool:
+        if lvl["strike"] not in seen_s:
+            seen_s.add(lvl["strike"])
+            deduped.append(lvl)
+
+    max_abs_gex = max((abs(g) for g in net_gex_arr), default=1) or 1
+    for lvl in deduped:
+        prox = abs(lvl["strike"] - spot) / spot
+        mag  = abs(lvl.get("gex", 0)) / max_abs_gex
+        lvl["proximity_pct"] = round(prox * 100, 2)
+        lvl["_score"] = mag / (prox + 0.001)
+
+    top3 = sorted(deduped, key=lambda x: x["_score"], reverse=True)[:3]
+    for lvl in top3:
+        lvl.pop("_score", None)
+
+    # Vol crush sentence
+    if vex_drift_target:
+        t_s = vex_drift_target["strike"]
+        direction = "higher" if t_s > spot else "lower"
+        if gex_vex_agree is False:
+            vol_crush_sentence = (
+                f"GEX and VEX conflict near spot; a vol crush would pull vanna flows toward "
+                f"${t_s:,.0f} ({direction}), potentially diverging from the gamma-stabilized range."
+            )
+        elif regime_label == "stable":
+            vol_crush_sentence = (
+                f"In the current stable (long-gamma) regime, a vol crush drives dealer vanna "
+                f"unwinds toward ${t_s:,.0f} ({direction})."
+            )
+        else:
+            vol_crush_sentence = (
+                f"In the volatile (short-gamma) regime, a vol crush amplifies moves; vanna "
+                f"flows target ${t_s:,.0f} ({direction}) as IV compresses."
+            )
+    else:
+        vol_crush_sentence = "Insufficient VEX data to project vol crush direction."
+
+    return {
+        "spot_price":   spot,
+        "strikes":      strikes,
+        "net_gex":      net_gex_arr,
+        "net_vex":      net_vex_arr,
+        "gex_vex_diff": gex_vex_diff,
+        "levels": {
+            "call_wall":               call_wall,
+            "secondary_call_wall":     sec_call_wall,
+            "put_wall":                put_wall,
+            "secondary_put_wall":      sec_put_wall,
+            "gamma_flip":              gamma_flip,
+            "acceleration_zones_above": accel_above,
+            "acceleration_zones_below": accel_below,
+            "vex_nearest_magnet":      vex_magnet,
+            "vex_nearest_repellent":   vex_repellent,
+            "vex_post_event_target":   vex_drift_target,
+        },
+        "regime": {
+            "spot_vs_gamma_flip": spot_vs_flip,
+            "regime_label":       regime_label,
+            "gex_vex_agree":      gex_vex_agree,
+            "top_3_levels":       top3,
+            "vol_crush_summary":  vol_crush_sentence,
+        },
+    }

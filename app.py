@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
 from scraper import RateLimitError
-from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, _parse_chain
+from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, build_levels_analysis, _parse_chain
 from database import init_db, get_db, seconds_since
 from auth import create_user, authenticate, create_token, verify_token
 from news_scraper import scrape_news, scrape_twitter, scrape_reddit, scrape_all, scrape_company_info
@@ -277,6 +277,20 @@ def exposure(
     try:
         chains = cached_fetch(ticker, max_expirations)
         return build_exposure_heatmap(chains, kind=kind)
+    except RateLimitError:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/levels/{ticker}")
+def levels(
+    ticker: str,
+    max_expirations: int = Query(default=6, ge=1, le=12),
+):
+    try:
+        chains = cached_fetch(ticker, max_expirations)
+        return build_levels_analysis(chains)
     except RateLimitError:
         raise
     except Exception as e:

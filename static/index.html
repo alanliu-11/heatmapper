@@ -215,6 +215,59 @@
           <div id="plot" class="plot-container" style="display:none;"></div>
         </div>
 
+        <!-- Structural Levels Card -->
+        <div class="card" id="levels-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Structural Levels</h2>
+              <p class="card-subtitle" id="levels-subtitle">GEX &amp; VEX key levels and regime analysis</p>
+            </div>
+          </div>
+          <div id="levels-skeleton" class="flex flex-col gap-4">
+            <div class="skeleton skeleton-text" style="width:60%"></div>
+            <div class="skeleton skeleton-block" style="height:180px;"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:16px;"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:16px;"></div>
+          </div>
+          <div id="levels-content" style="display:none;">
+            <div id="regime-banner" class="divergence-banner divergence-banner--loading mb-4">
+              <div class="divergence-content">
+                <div class="divergence-title" id="regime-title">Regime Analysis</div>
+                <div class="divergence-detail" id="regime-summary">--</div>
+              </div>
+              <div class="divergence-metrics">
+                <div class="divergence-metric">
+                  <span class="text-xs text-muted uppercase tracking-wide">Regime</span>
+                  <span class="font-semibold font-mono" id="regime-label">--</span>
+                </div>
+                <div class="divergence-metric">
+                  <span class="text-xs text-muted uppercase tracking-wide">GEX/VEX</span>
+                  <span class="font-semibold font-mono" id="regime-agree">--</span>
+                </div>
+              </div>
+            </div>
+            <div id="levels-chart" style="height:200px;"></div>
+            <div style="overflow-x:auto; margin-top:var(--space-4);">
+              <table class="levels-table">
+                <thead>
+                  <tr>
+                    <th>Level</th>
+                    <th>Strike</th>
+                    <th>Net GEX</th>
+                    <th>Net VEX</th>
+                    <th>GEX−VEX Diff</th>
+                    <th>From Spot</th>
+                  </tr>
+                </thead>
+                <tbody id="levels-tbody"></tbody>
+              </table>
+            </div>
+            <div id="top3-wrap" class="levels-top3" style="margin-top:var(--space-4);"></div>
+            <div id="accel-wrap" style="margin-top:var(--space-3);"></div>
+            <div id="vol-crush-note" class="text-sm text-muted" style="margin-top:var(--space-3);padding:var(--space-3);background:var(--color-surface-alt);border-radius:var(--radius-md);line-height:1.5;"></div>
+          </div>
+        </div>
+
         <div class="card" id="sentiment-card">
           <div class="card-header">
             <div>
@@ -446,6 +499,7 @@
         render();
         loadNews();
         loadDivergence();
+        loadLevels();
         loadCompanyInfo();
         loadSentimentBreakdown();
       } catch (e) {
@@ -705,6 +759,194 @@
         setStat("stat-earnings", d.earnings_date || "--");
         setStat("stat-rec", d.target_price ? `$${d.target_price.split(" ")[0]}` : (d.recommendation || "--"));
       } catch {}
+    }
+
+    // --- Structural Levels ---
+
+    function formatBig(n) {
+      if (n == null) return "--";
+      const abs = Math.abs(n);
+      const sign = n < 0 ? "-" : "";
+      if (abs >= 1e9) return sign + (abs / 1e9).toFixed(2) + "B";
+      if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + "M";
+      if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + "K";
+      return sign + abs.toFixed(0);
+    }
+
+    function renderLevelsChart(d) {
+      const t = getPlotlyTheme();
+      const slog = v => Math.sign(v) * Math.log10(1 + Math.abs(v));
+      const gexSlog  = d.net_gex.map(slog);
+      const vexSlog  = d.net_vex.map(slog);
+      const diffSlog = d.gex_vex_diff.map(slog);
+
+      const barColors = d.net_gex.map(v => v >= 0 ? "#22c55e" : "#ef4444");
+
+      const traces = [
+        {
+          type: "bar", name: "Net GEX", x: d.strikes, y: gexSlog,
+          marker: { color: barColors, opacity: 0.7 },
+          customdata: d.net_gex,
+          hovertemplate: "Strike: $%{x}<br>Net GEX: %{customdata:,.0f}<extra>GEX</extra>",
+        },
+        {
+          type: "scatter", mode: "lines+markers", name: "Net VEX",
+          x: d.strikes, y: vexSlog, customdata: d.net_vex,
+          line: { color: "#60a5fa", width: 2 },
+          marker: { size: 5, color: "#60a5fa" },
+          hovertemplate: "Strike: $%{x}<br>Net VEX: %{customdata:,.0f}<extra>VEX</extra>",
+        },
+        {
+          type: "scatter", mode: "lines", name: "GEX−VEX Diff",
+          x: d.strikes, y: diffSlog, customdata: d.gex_vex_diff,
+          line: { color: "#a78bfa", width: 2, dash: "dot" },
+          hovertemplate: "Strike: $%{x}<br>Diff: %{customdata:,.0f}<extra>Diff</extra>",
+        },
+      ];
+
+      if (d.spot_price != null) {
+        traces.push({
+          type: "scatter", mode: "lines", name: `Spot $${d.spot_price.toFixed(2)}`,
+          x: [d.spot_price, d.spot_price], y: [-10, 10],
+          line: { color: t.font.color, width: 1.5, dash: "dash" },
+          hoverinfo: "skip",
+        });
+      }
+
+      const layout = {
+        ...getLayoutBase(),
+        height: 200,
+        margin: { t: 10, b: 40, l: 40, r: 10 },
+        xaxis: { ...getLayoutBase().xaxis, title: { text: "Strike", font: { size: 11, color: t.secondaryColor } } },
+        yaxis: { ...getLayoutBase().yaxis, title: { text: "Signed log", font: { size: 11, color: t.secondaryColor } }, tickvals: [] },
+        showlegend: true,
+        legend: { orientation: "h", y: -0.35, font: { color: t.secondaryColor, size: 11 } },
+        barmode: "overlay",
+      };
+
+      Plotly.newPlot("levels-chart", traces, layout, { ...PLOTLY_CONFIG, responsive: true });
+    }
+
+    async function loadLevels() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      showSkeleton("levels-skeleton");
+      hideEl("levels-content");
+
+      try {
+        const res = await fetch(`/api/levels/${ticker}`);
+        if (!res.ok) { hideSkeleton("levels-skeleton"); return; }
+        const d = await res.json();
+
+        hideSkeleton("levels-skeleton");
+        showEl("levels-content");
+
+        document.getElementById("levels-subtitle").textContent =
+          `${ticker} — ${d.strikes.length} strikes in ±15% window, spot $${d.spot_price.toFixed(2)}`;
+
+        // Regime banner
+        const reg = d.regime;
+        const isStable = reg.regime_label === "stable";
+        document.getElementById("regime-title").textContent =
+          `${ticker}: ${isStable ? "Stable (Long-Gamma)" : "Volatile (Short-Gamma)"} Regime — spot is ${reg.spot_vs_gamma_flip} gamma flip`;
+        document.getElementById("regime-summary").textContent = reg.vol_crush_summary;
+        document.getElementById("regime-label").textContent = isStable ? "Stable" : "Volatile";
+        document.getElementById("regime-agree").textContent =
+          reg.gex_vex_agree === true ? "Aligned" : reg.gex_vex_agree === false ? "Conflict" : "--";
+        document.getElementById("regime-banner").className =
+          `divergence-banner ${isStable ? "divergence-banner--bullish-subtle" : "divergence-banner--bearish-subtle"} mb-4`;
+
+        // GEX/VEX/Diff chart
+        renderLevelsChart(d);
+
+        // Build lookup by strike → index
+        const gexByStrike = Object.fromEntries(d.strikes.map((s, i) => [s, d.net_gex[i]]));
+        const vexByStrike = Object.fromEntries(d.strikes.map((s, i) => [s, d.net_vex[i]]));
+        const diffByStrike = Object.fromEntries(d.strikes.map((s, i) => [s, d.gex_vex_diff[i]]));
+        const spot = d.spot_price;
+
+        // Levels table
+        const tbody = document.getElementById("levels-tbody");
+        tbody.innerHTML = "";
+        const tableRows = [
+          { label: "Call Wall",      badge: "badge--positive", data: d.levels.call_wall },
+          { label: "2nd Call Wall",  badge: "badge--positive", data: d.levels.secondary_call_wall },
+          { label: "Put Wall",       badge: "badge--positive", data: d.levels.put_wall },
+          { label: "2nd Put Wall",   badge: "badge--positive", data: d.levels.secondary_put_wall },
+          { label: "Gamma Flip",     badge: "badge--info",     data: d.levels.gamma_flip },
+          { label: "VEX Magnet",     badge: "badge--positive", data: d.levels.vex_nearest_magnet },
+          { label: "VEX Repellent",  badge: "badge--negative", data: d.levels.vex_nearest_repellent },
+          { label: "VEX Drift Tgt",  badge: "badge--info",     data: d.levels.vex_post_event_target },
+        ];
+        for (const row of tableRows) {
+          if (!row.data) continue;
+          const s = row.data.strike;
+          const gv = gexByStrike[s] ?? null;
+          const vv = vexByStrike[s] ?? null;
+          const dv = diffByStrike[s] ?? null;
+          const fromSpot = ((s - spot) / spot * 100).toFixed(2);
+          const dir = parseFloat(fromSpot) >= 0;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><span class="badge ${row.badge}">${row.label}</span></td>
+            <td class="font-mono">$${s.toFixed(2)}</td>
+            <td class="font-mono">${formatBig(gv)}</td>
+            <td class="font-mono">${formatBig(vv)}</td>
+            <td class="font-mono">${formatBig(dv)}</td>
+            <td class="font-mono" style="color:${dir ? "var(--color-accent-green)" : "var(--color-accent-red)"}">${dir ? "+" : ""}${fromSpot}%</td>
+          `;
+          tbody.appendChild(tr);
+        }
+
+        // Top 3 levels
+        const top3El = document.getElementById("top3-wrap");
+        top3El.innerHTML = "";
+        if (reg.top_3_levels && reg.top_3_levels.length) {
+          const hdr = document.createElement("div");
+          hdr.className = "text-xs text-muted uppercase tracking-wide";
+          hdr.style.marginBottom = "var(--space-2)";
+          hdr.textContent = "Top Levels to Watch";
+          top3El.appendChild(hdr);
+          for (const lvl of reg.top_3_levels) {
+            const row = document.createElement("div");
+            row.className = "levels-top3-item";
+            row.innerHTML = `
+              <span class="badge badge--info">${lvl.label}</span>
+              <span class="font-mono">$${lvl.strike.toFixed(2)}</span>
+              <span class="text-muted text-sm">${lvl.proximity_pct.toFixed(2)}% from spot</span>
+              <span class="font-mono text-muted text-sm">GEX: ${formatBig(lvl.gex)}</span>
+            `;
+            top3El.appendChild(row);
+          }
+        }
+
+        // Acceleration zones
+        const accelEl = document.getElementById("accel-wrap");
+        accelEl.innerHTML = "";
+        const az = [...(d.levels.acceleration_zones_above || []), ...(d.levels.acceleration_zones_below || [])];
+        if (az.length) {
+          const hdr = document.createElement("div");
+          hdr.className = "text-xs text-muted uppercase tracking-wide";
+          hdr.style.marginBottom = "var(--space-2)";
+          hdr.textContent = "Acceleration Zones (negative GEX)";
+          accelEl.appendChild(hdr);
+          const grid = document.createElement("div");
+          grid.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2);";
+          for (const z of az) {
+            const chip = document.createElement("span");
+            chip.className = "badge badge--negative font-mono";
+            const dir = z.strike > spot ? "▲" : "▼";
+            chip.textContent = `$${z.strike.toFixed(2)} ${dir} ${formatBig(z.gex)}`;
+            grid.appendChild(chip);
+          }
+          accelEl.appendChild(grid);
+        }
+
+        // Vol crush note
+        document.getElementById("vol-crush-note").textContent = reg.vol_crush_summary;
+
+      } catch {
+        hideSkeleton("levels-skeleton");
+      }
     }
 
     // --- Divergence ---
