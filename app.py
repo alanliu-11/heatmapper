@@ -243,6 +243,31 @@ def probability(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/debug/iv/{ticker}")
+def debug_iv(ticker: str, max_expirations: int = Query(default=6, ge=1, le=12)):
+    """Temporary: returns raw per-expiry strike/IV pairs to diagnose heatmap stability."""
+    chains = cached_fetch(ticker, max_expirations)
+    from datetime import datetime
+    import math
+    now = datetime.utcnow().timestamp()
+    result = []
+    for chain in chains:
+        opt = chain["optionChain"]["result"][0]["options"][0]
+        exp_ts = opt.get("expirationDate")
+        t = (exp_ts - now) / (365.25 * 24 * 3600) if exp_ts else None
+        label = datetime.utcfromtimestamp(exp_ts).strftime("%Y-%m-%d") if exp_ts else "?"
+        pairs = []
+        for side in ("calls", "puts"):
+            for o in opt.get(side, []):
+                k = o.get("strike")
+                iv = o.get("impliedVolatility")
+                if k is not None and iv is not None:
+                    pairs.append({"strike": k, "iv": iv, "side": side})
+        pairs.sort(key=lambda x: x["strike"])
+        result.append({"expiry": label, "t_years": round(t, 4) if t else None, "quotes": pairs})
+    return result
+
+
 @app.get("/exposure/{ticker}")
 def exposure(
     ticker: str,
