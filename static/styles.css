@@ -1073,3 +1073,26 @@ select.input-field {
   padding: var(--space-2) 0;
 }
 .mb-4 { margin-bottom: var(--space-4); }
+
+/* Glossary */
+.levels-glossary summary::-webkit-details-marker { display: none; }
+.levels-glossary summary::before { content: "▶ "; font-size: 10px; }
+.levels-glossary[open] summary::before { content: "▼ "; }
+.levels-glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.levels-glossary-item dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-1);
+}
+.levels-glossary-item dd {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  margin: 0;
+}

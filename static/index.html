@@ -265,6 +265,69 @@
             <div id="top3-wrap" class="levels-top3" style="margin-top:var(--space-4);"></div>
             <div id="accel-wrap" style="margin-top:var(--space-3);"></div>
             <div id="vol-crush-note" class="text-sm text-muted" style="margin-top:var(--space-3);padding:var(--space-3);background:var(--color-surface-alt);border-radius:var(--radius-md);line-height:1.5;"></div>
+
+            <!-- Glossary -->
+            <details class="levels-glossary" style="margin-top:var(--space-5);">
+              <summary class="text-xs text-muted uppercase tracking-wide" style="cursor:pointer;user-select:none;padding:var(--space-2) 0;">Term definitions</summary>
+              <dl class="levels-glossary-grid">
+                <div class="levels-glossary-item">
+                  <dt>Call Wall</dt>
+                  <dd>The strike above spot with the largest positive net GEX. Dealers are most heavily long gamma here, so they fade rallies by selling — acts as a ceiling. Price often struggles to sustain above it.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Put Wall</dt>
+                  <dd>The strike below spot with the largest positive net GEX. Dealers long gamma here buy dips — acts as a floor. The strongest downside support in the GEX framework.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>2nd Call / Put Wall</dt>
+                  <dd>The second-largest positive GEX strike above or below spot. Provides a layered level: if the primary wall breaks, this is the next expected zone of stabilisation.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Gamma Flip</dt>
+                  <dd>The strike closest to spot where net GEX changes sign (positive ↔ negative). Above it dealers are net long gamma (stabilising). Below it they are net short gamma (destabilising). Crossing the flip changes the market's character from mean-reverting to trending.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Acceleration Zone</dt>
+                  <dd>A strike between spot and a wall where net GEX is negative. Dealers short gamma at these strikes must chase the move to stay hedged — selling into a falling price, buying into a rising one. Instead of resisting a move toward the wall, they amplify it. Clusters of these create the conditions for fast, impulsive legs.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>VEX Magnet</dt>
+                  <dd>The strike within ~3% of spot with the largest positive net VEX. Dealers long vanna here gain delta when IV rises and lose delta when IV falls — so as IV compresses they sell, pulling price toward this strike. Acts as a short-term gravitational centre, especially post-event.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>VEX Repellent</dt>
+                  <dd>The strike within ~3% of spot with the largest negative net VEX. Dealers short vanna here lose delta as IV falls, so they buy to re-hedge — pushing price away from this strike. Tends to repel price during vol compression.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>VEX Drift Target</dt>
+                  <dd>The strike with the largest positive VEX across the whole board. After a vol event (earnings, Fed, CPI), IV crush drives the biggest vanna unwind here — dealers sell delta at scale, gravitating price toward this level over hours to days.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Net GEX</dt>
+                  <dd>Dealer net gamma exposure at a strike in dollars, summed across all expirations. Computed as (call gamma − put gamma) × OI × 100 × spot² × 0.01. Positive means dealers are net long gamma and stabilise price; negative means they amplify moves.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Net VEX</dt>
+                  <dd>Dealer net vanna exposure at a strike in dollars. Vanna measures how delta changes as IV moves. Positive VEX means dealers gain delta when IV rises (and lose it when IV falls). Drives directional pressure during vol expansions and crushes.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>GEX−VEX Diff</dt>
+                  <dd>The difference between net GEX and net VEX at each strike (both on a signed-log scale in the chart). Where they diverge, gamma and vanna forces are pulling in different directions — the level is contested. Where they align, both hedging flows reinforce the same price behaviour.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Stable regime</dt>
+                  <dd>Spot is above the gamma flip. Dealers are net long gamma in aggregate. They dampen volatility by fading moves — the market tends to mean-revert within the walls.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>Volatile regime</dt>
+                  <dd>Spot is below the gamma flip. Dealers are net short gamma in aggregate. They amplify moves by chasing them — directional breaks are more likely to extend, and realised volatility tends to be higher.</dd>
+                </div>
+                <div class="levels-glossary-item">
+                  <dt>GEX/VEX Aligned vs Conflict</dt>
+                  <dd>Whether gamma and vanna forces near spot are pointing the same direction. Aligned means both reinforce the same hedging bias (both stabilising or both directional). Conflict means one is stabilising while the other is driving directional flow — the net effect is ambiguous and conditions can shift quickly.</dd>
+                </div>
+              </dl>
+            </details>
           </div>
         </div>
 
