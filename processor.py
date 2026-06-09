@@ -141,6 +141,18 @@ def _bs_vanna(s: float, k: float, sigma: float, t: float,
 # tails instead of a symmetric lognormal. Each column is normalized to 100 (%).
 # ---------------------------------------------------------------------------
 
+def _ln_band_prob(spot: float, a: float, b: float,
+                  sigma: float, t: float,
+                  r: float = RISK_FREE_RATE) -> float:
+    """Lognormal P(a < S_T < b) for tail extrapolation beyond quoted strikes."""
+    if sigma <= 0 or t <= 0 or spot <= 0 or a <= 0 or b <= 0:
+        return 0.0
+    sqrt_t = math.sqrt(t)
+    drift = (r - 0.5 * sigma * sigma) * t
+    z = lambda k: (math.log(k / spot) - drift) / (sigma * sqrt_t)
+    return max(_norm_cdf(z(b)) - _norm_cdf(z(a)), 0.0)
+
+
 def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
                               band_width: float = 5.0) -> dict:
     try:
@@ -228,15 +240,24 @@ def build_probability_heatmap(chains: list[dict], near_pct: float = 0.25,
             return (up - dn) / (2.0 * h)
 
         d = disc(t)
-        # Only compute density where BOTH band edges are within the quoted strike
-        # range. The centre-check allowed the outermost included band to use one
-        # extrapolated (flat-clamped) edge in c_prime, biasing the finite-difference
-        # slope and dumping artefact mass at the boundary.
-        col = [
-            max(d * (c_prime(edges[i + 1]) - c_prime(edges[i])), 0.0)
-            if edges[i] >= k_lo and edges[i + 1] <= k_hi else 0.0
-            for i in range(len(strikes))
-        ]
+        iv_lo = ivs[0]   # edge IV for left tail
+        iv_hi = ivs[-1]  # edge IV for right tail
+        col = []
+        for i in range(len(strikes)):
+            a, b = edges[i], edges[i + 1]
+            if a >= k_lo and b <= k_hi:
+                # Fully inside quoted range: Breeden-Litzenberger density
+                p = max(d * (c_prime(b) - c_prime(a)), 0.0)
+            elif b <= k_lo:
+                # Entirely in left tail: lognormal with edge IV
+                p = _ln_band_prob(spot, a, b, iv_lo, t)
+            elif a >= k_hi:
+                # Entirely in right tail: lognormal with edge IV
+                p = _ln_band_prob(spot, a, b, iv_hi, t)
+            else:
+                # Boundary band straddles k_lo or k_hi: lognormal with nearest edge IV
+                p = _ln_band_prob(spot, a, b, iv_lo if a < k_lo else iv_hi, t)
+            col.append(p)
         total = sum(col)
         if total == 0:
             continue  # no quoted strikes overlap this expiry's grid — skip the column
