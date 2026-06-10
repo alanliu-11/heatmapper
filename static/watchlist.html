@@ -86,6 +86,79 @@
   </main>
 
   <script>
+    function sparklineSVG(values, width, height, color) {
+      if (!values || values.length < 2) return null;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range = max - min || 1;
+      const pts = values.map((v, i) => {
+        const x = (i / (values.length - 1)) * width;
+        const y = height - ((v - min) / range) * (height - 4) - 2;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", width);
+      svg.setAttribute("height", height);
+      svg.style.cssText = "overflow:visible;flex-shrink:0;";
+      const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      poly.setAttribute("points", pts);
+      poly.setAttribute("fill", "none");
+      poly.setAttribute("stroke", color);
+      poly.setAttribute("stroke-width", "1.5");
+      poly.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(poly);
+      return svg;
+    }
+
+    async function loadDivergenceHistory(ticker, container) {
+      try {
+        const res = await fetch(`/api/divergence/${ticker}/history?days=7`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const h = data.history;
+        if (!h || h.length < 2) return;
+
+        const pcrVals = h.map(r => r.pcr);
+        const sentVals = h.map(r => r.avg_sentiment);
+
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+        const textColor = isDark ? "#999" : "#6b6b6b";
+
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "margin-top:var(--space-3);border-top:1px solid var(--color-border);padding-top:var(--space-3);";
+
+        const label = document.createElement("div");
+        label.className = "text-xs text-muted uppercase tracking-wide";
+        label.style.marginBottom = "var(--space-2)";
+        label.textContent = "7-day history";
+        wrap.appendChild(label);
+
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:var(--space-4);align-items:center;";
+
+        for (const [name, vals, color] of [["P/C", pcrVals, "#f59e0b"], ["Sent", sentVals, "#60a5fa"]]) {
+          const col = document.createElement("div");
+          col.style.cssText = "display:flex;align-items:center;gap:var(--space-2);";
+          const lbl = document.createElement("span");
+          lbl.className = "text-xs";
+          lbl.style.cssText = `color:${textColor};white-space:nowrap;`;
+          lbl.textContent = name;
+          const svg = sparklineSVG(vals, 60, 24, color);
+          const latest = document.createElement("span");
+          latest.className = "text-xs font-mono";
+          latest.style.color = textColor;
+          latest.textContent = vals[vals.length - 1].toFixed(2);
+          col.appendChild(lbl);
+          if (svg) col.appendChild(svg);
+          col.appendChild(latest);
+          row.appendChild(col);
+        }
+
+        wrap.appendChild(row);
+        container.appendChild(wrap);
+      } catch {}
+    }
+
     async function loadUser() {
       try {
         const res = await fetch("/api/me");
@@ -216,6 +289,11 @@
       articlesRow.appendChild(artLabel);
       articlesRow.appendChild(artCount);
       card.appendChild(articlesRow);
+
+      // Async sparklines — fires after card is returned; renders only if history exists
+      const sparkContainer = document.createElement("div");
+      card.appendChild(sparkContainer);
+      loadDivergenceHistory(ticker, sparkContainer);
 
       return card;
     }

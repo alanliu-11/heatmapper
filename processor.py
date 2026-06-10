@@ -337,6 +337,46 @@ def build_exposure_heatmap(chains: list[dict], kind: str = "gamma") -> dict:
     }
 
 
+def build_iv_smile(chains: list[dict]) -> dict:
+    """Return per-expiry IV smile: IV% vs strike, one entry per expiry sorted by time."""
+    try:
+        spot = chains[0]["optionChain"]["result"][0]["quote"]["regularMarketPrice"]
+    except (KeyError, IndexError):
+        spot = None
+
+    now = datetime.utcnow().timestamp()
+    expiries = []
+
+    for chain in chains:
+        result = chain["optionChain"]["result"][0]
+        opt = result["options"][0]
+        expiry_ts = opt.get("expirationDate")
+        if expiry_ts is None:
+            continue
+
+        label = datetime.utcfromtimestamp(expiry_ts).strftime("%Y-%m-%d")
+        t = max((expiry_ts - now) / _SECONDS_PER_YEAR, 1.0 / _SECONDS_PER_YEAR)
+
+        iv_by_strike: dict[float, list[float]] = {}
+        for side in ("calls", "puts"):
+            for o in opt.get(side, []):
+                k = o.get("strike")
+                iv = o.get("impliedVolatility")
+                if k is None or iv is None or iv <= 0:
+                    continue
+                iv_by_strike.setdefault(k, []).append(iv)
+
+        if not iv_by_strike:
+            continue
+
+        ks = sorted(iv_by_strike)
+        ivs = [sum(iv_by_strike[k]) / len(iv_by_strike[k]) * 100 for k in ks]
+        expiries.append({"label": label, "t_years": round(t, 4), "strikes": ks, "ivs": ivs})
+
+    expiries.sort(key=lambda e: e["t_years"])
+    return {"spot_price": spot, "expiries": expiries}
+
+
 def build_levels_analysis(chains: list[dict]) -> dict:
     """Aggregate net GEX/VEX per strike and derive structural levels and regime summary."""
     try:

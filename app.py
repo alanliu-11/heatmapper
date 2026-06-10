@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from cache import cached_fetch, invalidate
 from scraper import RateLimitError
-from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, build_levels_analysis, _parse_chain
+from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, build_levels_analysis, build_iv_smile, _parse_chain
 from database import init_db, get_db, seconds_since
 from auth import create_user, authenticate, create_token, verify_token
 from news_scraper import scrape_news, scrape_twitter, scrape_reddit, scrape_all, scrape_company_info
@@ -16,6 +16,7 @@ import json
 import asyncio
 import time
 import logging
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("heatmapper")
 
@@ -290,7 +291,12 @@ def levels(
 ):
     try:
         chains = cached_fetch(ticker, max_expirations)
-        return build_levels_analysis(chains)
+        result = build_levels_analysis(chains)
+        try:
+            _save_levels_snapshot(ticker.upper(), result, pcr=None)
+        except Exception:
+            pass
+        return result
     except RateLimitError:
         raise
     except Exception as e:
@@ -301,6 +307,96 @@ def levels(
 def refresh(ticker: str):
     invalidate(ticker)
     return {"status": "invalidated", "ticker": ticker.upper()}
+
+
+@app.get("/api/iv-smile/{ticker}")
+def iv_smile(ticker: str, max_expirations: int = Query(default=6, ge=1, le=12)):
+    try:
+        chains = cached_fetch(ticker, max_expirations)
+        return build_iv_smile(chains)
+    except RateLimitError:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# --- History snapshots ---
+
+def _save_levels_snapshot(ticker: str, data: dict, pcr: float | None) -> None:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT recorded_at FROM levels_history WHERE ticker = ? ORDER BY recorded_at DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+        if row and seconds_since(row["recorded_at"]) < 3600:
+            return
+        levels = data.get("levels", {})
+        cw = levels.get("call_wall") or {}
+        pw = levels.get("put_wall") or {}
+        gf = levels.get("gamma_flip") or {}
+        conn.execute(
+            "INSERT INTO levels_history (ticker, spot_price, call_wall, put_wall, gamma_flip, pcr) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ticker, data.get("spot_price"), cw.get("strike"), pw.get("strike"), gf.get("strike"), pcr),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def _save_divergence_snapshot(ticker: str, pcr: float, avg_sentiment: float) -> None:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT recorded_at FROM divergence_history WHERE ticker = ? ORDER BY recorded_at DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+        if row and seconds_since(row["recorded_at"]) < 3600:
+            return
+        conn.execute(
+            "INSERT INTO divergence_history (ticker, pcr, avg_sentiment) VALUES (?, ?, ?)",
+            (ticker, pcr, avg_sentiment),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+@app.get("/api/history/{ticker}")
+def levels_history(ticker: str, days: int = Query(default=14, ge=1, le=30)):
+    ticker = ticker.upper()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT recorded_at, spot_price, call_wall, put_wall, gamma_flip, pcr "
+            "FROM levels_history WHERE ticker = ? AND recorded_at > ? ORDER BY recorded_at ASC",
+            (ticker, cutoff),
+        ).fetchall()
+        return {"ticker": ticker, "history": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/divergence/{ticker}/history")
+def divergence_history_endpoint(ticker: str, days: int = Query(default=7, ge=1, le=30)):
+    ticker = ticker.upper()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT recorded_at, pcr, avg_sentiment FROM divergence_history "
+            "WHERE ticker = ? AND recorded_at > ? ORDER BY recorded_at ASC",
+            (ticker, cutoff),
+        ).fetchall()
+        return {"ticker": ticker, "history": [dict(r) for r in rows]}
+    finally:
+        conn.close()
 
 
 # --- Company Info API ---
@@ -421,6 +517,11 @@ def divergence(ticker: str):
         signal = "Options flow and sentiment are aligned bearish. Consensus trade."
     else:
         signal = "No strong directional signal from either options or sentiment."
+
+    try:
+        _save_divergence_snapshot(ticker, pcr, avg_sent)
+    except Exception:
+        pass
 
     return {
         "ticker": ticker,

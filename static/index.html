@@ -78,6 +78,7 @@
             <option value="openInterest">Open Interest</option>
             <option value="volume">Volume</option>
             <option value="impliedVolatility">Implied Volatility</option>
+            <option value="ivSmile">IV Smile</option>
             <option value="gex">Gamma Exposure (GEX)</option>
             <option value="vex">Vanna Exposure (VEX)</option>
           </select>
@@ -266,6 +267,13 @@
             <div id="accel-wrap" style="margin-top:var(--space-3);"></div>
             <div id="vol-crush-note" class="text-sm text-muted" style="margin-top:var(--space-3);padding:var(--space-3);background:var(--color-surface-alt);border-radius:var(--radius-md);line-height:1.5;"></div>
 
+            <!-- Level History -->
+            <details id="levels-history-details" style="margin-top:var(--space-5);">
+              <summary class="text-sm text-muted" style="cursor:pointer;user-select:none;">Level history (last 14 days)</summary>
+              <div id="levels-history-chart" style="height:180px;margin-top:var(--space-3);"></div>
+              <p id="levels-history-empty" class="text-xs text-muted" style="display:none;padding:var(--space-3) 0;">Not enough history yet — levels are snapshotted hourly.</p>
+            </details>
+
             <!-- Glossary -->
             <details class="levels-glossary" style="margin-top:var(--space-5);">
               <summary>Term definitions</summary>
@@ -438,6 +446,7 @@
       openInterest:       "Open Interest",
       volume:             "Volume",
       impliedVolatility:  "Implied Volatility",
+      ivSmile:            "IV Smile",
       gex:                "Gamma Exposure",
       vex:                "Vanna Exposure",
     };
@@ -451,6 +460,7 @@
     };
 
     const EXPOSURE_METRICS = { gex: "gamma", vex: "vanna" };
+    const SMILE_COLORS = ["#f59e0b","#60a5fa","#34d399","#f87171","#a78bfa","#fb923c","#38bdf8","#4ade80","#fb7185","#c084fc"];
 
     const PLOTLY_CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
 
@@ -479,11 +489,11 @@
     function onMetricChange() {
       const metric = document.getElementById("metric").value;
       const isProb = metric === "probability";
-      document.getElementById("view-tabs").style.display = isProb ? "none" : "inline-flex";
+      const isSmile = metric === "ivSmile";
+      document.getElementById("view-tabs").style.display = (isProb || isSmile) ? "none" : "inline-flex";
       document.getElementById("band-group").style.display = isProb ? "flex" : "none";
       document.getElementById("tab-net").textContent =
         metric === "impliedVolatility" ? "IV Skew" : "Net";
-      // Dealer exposure is read on the net book by default.
       if (EXPOSURE_METRICS[metric]) setView("net");
       if (_data) load();
     }
@@ -541,6 +551,8 @@
       let url;
       if (metric === "probability") {
         url = `/probability/${ticker}?max_expirations=${maxExp}&band_width=${band}`;
+      } else if (metric === "ivSmile") {
+        url = `/api/iv-smile/${ticker}?max_expirations=${maxExp}`;
       } else if (EXPOSURE_METRICS[metric]) {
         url = `/exposure/${ticker}?kind=${EXPOSURE_METRICS[metric]}&max_expirations=${maxExp}`;
       } else {
@@ -558,7 +570,15 @@
         hideSkeleton("plot-skeleton");
         showEl("plot");
 
-        updateSidebar(_data);
+        if (metric !== "ivSmile") updateSidebar(_data);
+        else {
+          // Minimal sidebar update for IV smile
+          document.getElementById("chart-subtitle").textContent = `${ticker} - IV Smile`;
+          if (_data.spot_price != null) document.getElementById("spot-price").textContent = `$${_data.spot_price.toFixed(2)}`;
+          document.getElementById("stat-metric").textContent = "IV Smile";
+          document.getElementById("stat-expirations").textContent = _data.expiries ? _data.expiries.length : "--";
+          document.getElementById("last-updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        }
         render();
         loadNews();
         loadDivergence();
@@ -656,8 +676,48 @@
       Plotly.newPlot("plot", traces, layout, PLOTLY_CONFIG);
     }
 
+    function renderIVSmile() {
+      const { spot_price, expiries } = _data;
+      if (!expiries || !expiries.length) return;
+      const t = getPlotlyTheme();
+
+      const traces = expiries.map((exp, i) => ({
+        type: "scatter", mode: "lines+markers",
+        name: exp.label,
+        x: exp.strikes,
+        y: exp.ivs,
+        line: { color: SMILE_COLORS[i % SMILE_COLORS.length], width: 2 },
+        marker: { size: 4, color: SMILE_COLORS[i % SMILE_COLORS.length] },
+        hovertemplate: `Strike: $%{x}<br>IV: %{y:.1f}%<br>${exp.label}<extra></extra>`,
+      }));
+
+      if (spot_price != null) {
+        const allIVs = expiries.flatMap(e => e.ivs);
+        const ivMin = Math.min(...allIVs);
+        const ivMax = Math.max(...allIVs);
+        traces.push({
+          type: "scatter", mode: "lines",
+          x: [spot_price, spot_price], y: [ivMin * 0.9, ivMax * 1.1],
+          line: { color: t.font.color, width: 1.5, dash: "dash" },
+          name: `Spot $${spot_price.toFixed(2)}`, hoverinfo: "skip",
+        });
+      }
+
+      const layout = {
+        paper_bgcolor: t.paper_bgcolor, plot_bgcolor: t.plot_bgcolor, font: t.font,
+        xaxis: { title: { text: "Strike", font: { size: 12, color: t.secondaryColor } }, gridcolor: t.gridcolor, linecolor: t.linecolor },
+        yaxis: { title: { text: "IV (%)", font: { size: 12, color: t.secondaryColor } }, gridcolor: t.gridcolor, linecolor: t.linecolor, ticksuffix: "%" },
+        margin: { t: 10, r: 20, b: 60, l: 60 },
+        showlegend: true,
+        legend: { x: 1.02, y: 1, font: { color: t.secondaryColor, size: 11 } },
+      };
+
+      Plotly.newPlot("plot", traces, layout, PLOTLY_CONFIG);
+    }
+
     function render() {
       if (_data && _data.metric === "probability") { renderProbability(); return; }
+      if (_data && _data.expiries) { renderIVSmile(); return; }
 
       const { strikes, expirations, calls, puts, metric, spot_price } = _data;
       const t = getPlotlyTheme();
@@ -1007,9 +1067,57 @@
         // Vol crush note
         document.getElementById("vol-crush-note").textContent = reg.vol_crush_summary;
 
+        loadLevelsHistory();
+
       } catch {
         hideSkeleton("levels-skeleton");
       }
+    }
+
+    async function loadLevelsHistory() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+      try {
+        const res = await fetch(`/api/history/${ticker}?days=14`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const h = data.history;
+        if (!h || h.length < 2) {
+          document.getElementById("levels-history-empty").style.display = "";
+          return;
+        }
+        document.getElementById("levels-history-empty").style.display = "none";
+
+        const times = h.map(r => new Date(r.recorded_at).toLocaleDateString());
+        const t = getPlotlyTheme();
+
+        const traces = [
+          { type: "scatter", mode: "lines+markers", name: "Spot", x: times, y: h.map(r => r.spot_price),
+            line: { color: t.font.color, width: 1.5, dash: "dot" }, marker: { size: 4 },
+            hovertemplate: "Spot: $%{y:.2f}<extra></extra>" },
+          { type: "scatter", mode: "lines+markers", name: "Call Wall", x: times, y: h.map(r => r.call_wall),
+            line: { color: "#22c55e", width: 2 }, marker: { size: 5 },
+            hovertemplate: "Call Wall: $%{y:.2f}<extra></extra>" },
+          { type: "scatter", mode: "lines+markers", name: "Put Wall", x: times, y: h.map(r => r.put_wall),
+            line: { color: "#ef4444", width: 2 }, marker: { size: 5 },
+            hovertemplate: "Put Wall: $%{y:.2f}<extra></extra>" },
+          { type: "scatter", mode: "lines+markers", name: "Gamma Flip", x: times, y: h.map(r => r.gamma_flip),
+            line: { color: "#f59e0b", width: 2, dash: "dash" }, marker: { size: 5 },
+            hovertemplate: "Gamma Flip: $%{y:.2f}<extra></extra>" },
+        ];
+
+        const layout = {
+          paper_bgcolor: t.paper_bgcolor, plot_bgcolor: t.plot_bgcolor, font: t.font,
+          xaxis: { gridcolor: t.gridcolor, linecolor: t.linecolor, tickangle: -30 },
+          yaxis: { gridcolor: t.gridcolor, linecolor: t.linecolor,
+            title: { text: "Strike", font: { size: 11, color: t.secondaryColor } } },
+          margin: { t: 8, b: 55, l: 55, r: 10 },
+          showlegend: true,
+          legend: { orientation: "h", y: -0.4, font: { color: t.secondaryColor, size: 11 } },
+          height: 180,
+        };
+
+        Plotly.newPlot("levels-history-chart", traces, layout, { ...PLOTLY_CONFIG, responsive: true });
+      } catch {}
     }
 
     // --- Divergence ---

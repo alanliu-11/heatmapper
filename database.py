@@ -107,6 +107,25 @@ _SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON watchlist(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist(ticker)",
     "CREATE INDEX IF NOT EXISTS idx_push_user_id ON push_subscriptions(user_id)",
+    """CREATE TABLE IF NOT EXISTS levels_history (
+        id SERIAL PRIMARY KEY,
+        ticker CITEXT NOT NULL,
+        recorded_at TIMESTAMPTZ DEFAULT now(),
+        spot_price REAL,
+        call_wall REAL,
+        put_wall REAL,
+        gamma_flip REAL,
+        pcr REAL
+    )""",
+    """CREATE TABLE IF NOT EXISTS divergence_history (
+        id SERIAL PRIMARY KEY,
+        ticker CITEXT NOT NULL,
+        recorded_at TIMESTAMPTZ DEFAULT now(),
+        pcr REAL NOT NULL,
+        avg_sentiment REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_levels_history_ticker ON levels_history(ticker, recorded_at)",
+    "CREATE INDEX IF NOT EXISTS idx_divergence_history_ticker ON divergence_history(ticker, recorded_at)",
 ]
 
 
