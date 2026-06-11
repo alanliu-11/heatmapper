@@ -232,7 +232,7 @@
       viewBtn.textContent = "View";
       viewBtn.style.fontSize = "var(--text-xs)";
       viewBtn.style.padding = "var(--space-1) var(--space-3)";
-      viewBtn.addEventListener("click", () => { window.location.href = `/?ticker=${ticker}`; });
+      viewBtn.addEventListener("click", () => { window.location.href = `/${ticker}`; });
 
       const removeBtn = document.createElement("button");
       removeBtn.className = "card-menu-btn";

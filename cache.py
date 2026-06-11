@@ -21,6 +21,14 @@ def cached_fetch(ticker: str, max_expirations: int = 6) -> list:
     return data
 
 
+def warm(ticker: str, max_expirations: int = 6) -> None:
+    """Fetch and store regardless of TTL, so a fresh entry is always in place
+    before the old one expires. Used by the background pre-warmer."""
+    ticker = ticker.upper()
+    data = fetch_all_expirations(ticker, max_expirations)
+    _store[(ticker, max_expirations)] = (time.time(), data)
+
+
 def invalidate(ticker: str) -> None:
     ticker = ticker.upper()
     for key in [k for k in _store if k[0] == ticker]:

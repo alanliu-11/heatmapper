@@ -40,14 +40,39 @@ REFRESH_SECRET_KEY = "questrade_refresh_token"
 # Batch size for the options-quotes endpoint (symbolIds per POST).
 _QUOTE_CHUNK = 100
 
-# Concurrent quote-batch requests. Questrade allows ~20 market-data requests
-# per second; 4 workers keeps us comfortably under that.
-_QUOTE_WORKERS = 4
+# Concurrent quote-batch requests. Actual request rate is governed by the
+# pacer below, so this just needs to be enough to keep the pipeline full.
+_QUOTE_WORKERS = 8
+
+# Only quote strikes within this fraction of spot. Nothing downstream looks
+# further out (probability uses ±25%, exposure/levels ±15%), and skipping the
+# far wings cuts the number of quote batches by half or more on liquid names.
+_STRIKE_WINDOW = 0.30
 
 _lock = threading.Lock()
 _access_token = None
 _api_server = None
 _access_expiry = 0.0
+
+# Shared session: reuses pooled TLS connections so the dozens of quote-batch
+# calls don't each pay a fresh handshake. (Sized for _QUOTE_WORKERS threads.)
+_session = requests.Session()
+
+# Pace request starts to stay under Questrade's ~20/sec market-data limit;
+# with keep-alive, 8 unthrottled workers would burst well past it.
+_MIN_REQUEST_INTERVAL = 1.0 / 18
+_pace_lock = threading.Lock()
+_next_request_at = 0.0
+
+
+def _throttle():
+    global _next_request_at
+    with _pace_lock:
+        now = time.time()
+        wait = _next_request_at - now
+        _next_request_at = max(now, _next_request_at) + _MIN_REQUEST_INTERVAL
+    if wait > 0:
+        time.sleep(wait)
 
 
 class RateLimitError(Exception):
@@ -83,7 +108,7 @@ def _refresh_access_token():
             "No Questrade refresh token. Set QUESTRADE_REFRESH_TOKEN."
         )
 
-    resp = requests.get(
+    resp = _session.get(
         LOGIN_URL,
         params={"grant_type": "refresh_token", "refresh_token": refresh_token},
         timeout=30,
@@ -125,9 +150,10 @@ def _request(method: str, path: str, *, params=None, json=None) -> dict:
     with _lock:
         token, server = _ensure_access()
 
+    _throttle()
     url = f"{server}/{path.lstrip('/')}"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.request(
+    resp = _session.request(
         method, url, params=params, json=json, headers=headers, timeout=30
     )
 
@@ -140,8 +166,9 @@ def _request(method: str, path: str, *, params=None, json=None) -> dict:
             if token == _access_token:
                 _refresh_access_token()
             token, server = _access_token, _api_server
+        _throttle()
         url = f"{server}/{path.lstrip('/')}"
-        resp = requests.request(
+        resp = _session.request(
             method, url, params=params, json=json,
             headers={"Authorization": f"Bearer {token}"}, timeout=30,
         )
@@ -212,11 +239,22 @@ def _normalize_iv(volatility) -> float | None:
 def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
     ticker = ticker.upper()
     symbol_id = _resolve_symbol_id(ticker)
-    spot, prev_close = _get_spot(symbol_id)
 
-    chain = _request("GET", f"v1/symbols/{symbol_id}/options").get("optionChain", [])
+    # The spot quote and the chain structure are independent once we have the
+    # symbol id, so fetch them concurrently.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        spot_future = pool.submit(_get_spot, symbol_id)
+        chain_future = pool.submit(_request, "GET", f"v1/symbols/{symbol_id}/options")
+        spot, prev_close = spot_future.result()
+        chain = chain_future.result().get("optionChain", [])
+
     if not chain:
         raise ValueError(f"No options found for {ticker}.")
+
+    # Quote only strikes near spot — see _STRIKE_WINDOW. Without a spot price
+    # we can't center a window, so fall back to the full chain.
+    lo = spot * (1 - _STRIKE_WINDOW) if spot else None
+    hi = spot * (1 + _STRIKE_WINDOW) if spot else None
 
     # Each optionChain entry is one expiry. Build, per expiry, a map of
     # symbolId -> (strike, side) so we can join the quote data back by id.
@@ -231,6 +269,10 @@ def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
         for root in entry.get("chainPerRoot", []):
             for s in root.get("chainPerStrikePrice", []):
                 strike = s.get("strikePrice")
+                if strike is None:
+                    continue
+                if lo is not None and not (lo <= strike <= hi):
+                    continue
                 if s.get("callSymbolId"):
                     id_map[s["callSymbolId"]] = (strike, "calls")
                     all_ids.append(s["callSymbolId"])

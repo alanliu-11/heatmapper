@@ -567,6 +567,15 @@
         }
         _data = await res.json();
         localStorage.setItem("lastTicker", ticker);
+        if (window.location.pathname !== `/${ticker}`) {
+          // Replace (not push) when leaving "/" so back doesn't land on a
+          // page that immediately redirects forward again.
+          if (window.location.pathname === "/") {
+            history.replaceState(null, "", `/${ticker}`);
+          } else {
+            history.pushState(null, "", `/${ticker}`);
+          }
+        }
 
         hideSkeleton("plot-skeleton");
         showEl("plot");
@@ -1336,13 +1345,24 @@
     }
 
     // --- Init ---
-    const urlTicker = new URLSearchParams(window.location.search).get("ticker");
+    function tickerFromPath() {
+      const m = window.location.pathname.match(/^\/([A-Za-z0-9.\-]{1,10})$/);
+      return m ? m[1].toUpperCase() : null;
+    }
+    const urlTicker = tickerFromPath() || new URLSearchParams(window.location.search).get("ticker");
     if (urlTicker) {
       document.getElementById("ticker").value = urlTicker.toUpperCase();
     } else {
       const lastTicker = localStorage.getItem("lastTicker");
       if (lastTicker) document.getElementById("ticker").value = lastTicker;
     }
+    window.addEventListener("popstate", () => {
+      const t = tickerFromPath();
+      if (t && t !== document.getElementById("ticker").value.trim().toUpperCase()) {
+        document.getElementById("ticker").value = t;
+        load();
+      }
+    });
     // --- Toast ---
     function showToast(msg, duration = 4000) {
       const t = document.getElementById("toast");

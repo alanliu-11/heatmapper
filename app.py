@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from cache import cached_fetch, invalidate
+from cache import cached_fetch, invalidate, warm
 from scraper import RateLimitError
 from processor import build_heatmap, build_probability_heatmap, build_exposure_heatmap, build_levels_analysis, build_iv_smile, _parse_chain
 from database import init_db, get_db, seconds_since
@@ -14,6 +14,7 @@ from typing import Literal
 import psycopg
 import json
 import asyncio
+import re
 import threading
 import time
 import logging
@@ -893,7 +894,7 @@ def _scan_and_notify() -> list[dict]:
                     info["sub"],
                     title=f"Divergence: {ticker}",
                     body=d["msg"],
-                    url=f"/?ticker={ticker}",
+                    url=f"/{ticker}",
                 )
 
     return alerts
@@ -931,7 +932,7 @@ def scan_watchlist(request: Request):
         if row and alerts:
             sub = json.loads(row["subscription_json"])
             for a in alerts:
-                send_push(sub, title=f"Divergence: {a['ticker']}", body=a["msg"], url=f"/?ticker={a['ticker']}")
+                send_push(sub, title=f"Divergence: {a['ticker']}", body=a["msg"], url=f"/{a['ticker']}")
     finally:
         conn.close()
 
@@ -954,6 +955,59 @@ async def _background_scanner():
             logger.error(f"Background scan error: {e}")
 
 
+# --- Cache Pre-warmer ---
+
+# Re-warm under the 15-min options-cache TTL so entries are replaced before
+# they expire and visitors (almost) never pay a cold Questrade fetch.
+PREWARM_INTERVAL = 10 * 60
+
+def _prewarm_tickers() -> None:
+    tickers = ["SPY"]
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT DISTINCT ticker FROM watchlist").fetchall()
+        tickers += [r["ticker"] for r in rows if r["ticker"] not in tickers]
+    finally:
+        conn.close()
+
+    for i, ticker in enumerate(tickers):
+        if i > 0:
+            time.sleep(SCAN_TICKER_DELAY)
+        try:
+            warm(ticker)
+        except Exception as e:
+            logger.warning(f"Cache pre-warm failed for {ticker}: {e}")
+
+
+async def _background_prewarmer():
+    # First pass runs immediately so a fresh deploy warms SPY (and the
+    # watchlist) before the first visitor arrives.
+    while True:
+        try:
+            await asyncio.to_thread(_prewarm_tickers)
+        except Exception as e:
+            logger.error(f"Cache pre-warm error: {e}")
+        await asyncio.sleep(PREWARM_INTERVAL)
+
+
 @app.on_event("startup")
 def start_background_scanner():
-    asyncio.get_event_loop().create_task(_background_scanner())
+    loop = asyncio.get_event_loop()
+    loop.create_task(_background_scanner())
+    loop.create_task(_background_prewarmer())
+
+
+# --- Ticker pages ---
+# Registered last so every fixed route above (/login, /news, /api/..., etc.)
+# takes priority; this only catches single-segment paths shaped like a ticker.
+
+_TICKER_PATH_RE = re.compile(r"^[A-Za-z0-9.\-]{1,10}$")
+
+@app.get("/{ticker}")
+def ticker_page(ticker: str, request: Request):
+    if not _TICKER_PATH_RE.match(ticker):
+        raise HTTPException(status_code=404, detail="Not found")
+    user = get_current_user(request)
+    if not user:
+        return _clear_stale_cookie(FileResponse("static/landing.html"), request)
+    return FileResponse("static/index.html")
