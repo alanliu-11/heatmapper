@@ -14,6 +14,7 @@ from typing import Literal
 import psycopg
 import json
 import asyncio
+import threading
 import time
 import logging
 from datetime import datetime, timezone, timedelta
@@ -447,6 +448,7 @@ def divergence(ticker: str):
     except Exception:
         raise HTTPException(status_code=502, detail="Could not fetch options data")
 
+    import numpy as np
     import pandas as pd
     frames = [_parse_chain(c) for c in chains]
     df = pd.concat(frames, ignore_index=True)
@@ -457,19 +459,16 @@ def divergence(ticker: str):
     total_oi = total_call_oi + total_put_oi
     pcr = round(total_put_oi / total_call_oi, 3) if total_call_oi > 0 else 999.0
 
-    strikes = sorted(df["strike"].unique())
+    # Pain at settlement price s = sum over calls of max(s - K, 0) * OI plus
+    # sum over puts of max(K - s, 0) * OI, evaluated at every strike at once.
+    strikes = np.sort(df["strike"].unique()).astype(float)
     max_pain_strike = None
-    min_pain = float("inf")
-    for s in strikes:
-        pain = 0.0
-        for _, r in df.iterrows():
-            if r["type"] == "call" and s > r["strike"]:
-                pain += (s - r["strike"]) * r["openInterest"]
-            elif r["type"] == "put" and s < r["strike"]:
-                pain += (r["strike"] - s) * r["openInterest"]
-        if pain < min_pain:
-            min_pain = pain
-            max_pain_strike = float(s)
+    if len(strikes):
+        calls = df[df["type"] == "call"]
+        puts = df[df["type"] == "put"]
+        call_pain = np.maximum(strikes[:, None] - calls["strike"].to_numpy()[None, :], 0) @ calls["openInterest"].to_numpy()
+        put_pain = np.maximum(puts["strike"].to_numpy()[None, :] - strikes[:, None], 0) @ puts["openInterest"].to_numpy()
+        max_pain_strike = float(strikes[np.argmin(call_pain + put_pain)])
 
     if pcr < 0.7:
         positioning = "bullish"
@@ -543,6 +542,55 @@ def divergence(ticker: str):
 
 NEWS_CACHE_TTL = 15 * 60
 
+# Tickers with a news refresh currently in flight, so concurrent requests
+# don't kick off duplicate scrapes.
+_news_refresh_lock = threading.Lock()
+_news_refreshing: set[str] = set()
+
+
+def _fetch_and_store_news(ticker: str) -> None:
+    try:
+        articles = analyze_articles(scrape_all(ticker))
+        conn = get_db()
+        try:
+            conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
+            for a in articles:
+                conn.execute(
+                    """INSERT INTO news (ticker, title, source, url, snippet, published,
+                       sentiment_score, sentiment_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (ticker, a["title"], a["source"], a["url"], a["snippet"],
+                     a["published"], a["sentiment"]["compound"], a["sentiment"]["label"]),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"News refresh failed for {ticker}: {e}")
+    finally:
+        with _news_refresh_lock:
+            _news_refreshing.discard(ticker)
+
+
+def _refresh_news_if_stale(ticker: str, last_fetched_at) -> None:
+    """Keep the news cache for `ticker` fresh without blocking the request.
+
+    If there is no cached news at all, scrape synchronously (there's nothing
+    to serve yet). If the cache is merely stale, serve it and refresh in a
+    background thread (stale-while-revalidate).
+    """
+    has_data = last_fetched_at is not None
+    if has_data and seconds_since(last_fetched_at) <= NEWS_CACHE_TTL:
+        return
+    with _news_refresh_lock:
+        if ticker in _news_refreshing:
+            return
+        _news_refreshing.add(ticker)
+    if has_data:
+        threading.Thread(target=_fetch_and_store_news, args=(ticker,), daemon=True).start()
+    else:
+        _fetch_and_store_news(ticker)
+
+
 @app.get("/api/news/{ticker}")
 def get_news(ticker: str, limit: int = Query(default=10, ge=1, le=50)):
     ticker = ticker.upper()
@@ -553,20 +601,7 @@ def get_news(ticker: str, limit: int = Query(default=10, ge=1, le=50)):
             (ticker,),
         ).fetchone()
 
-        needs_fetch = row is None or seconds_since(row["fetched_at"]) > NEWS_CACHE_TTL
-
-        if needs_fetch:
-            articles = scrape_all(ticker)
-            articles = analyze_articles(articles)
-            conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
-            for a in articles:
-                conn.execute(
-                    """INSERT INTO news (ticker, title, source, url, snippet, published,
-                       sentiment_score, sentiment_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (ticker, a["title"], a["source"], a["url"], a["snippet"],
-                     a["published"], a["sentiment"]["compound"], a["sentiment"]["label"]),
-                )
-            conn.commit()
+        _refresh_news_if_stale(ticker, row["fetched_at"] if row else None)
 
         rows = conn.execute(
             "SELECT id, title, source, url, snippet, published, sentiment_score, sentiment_label, fetched_at "
@@ -615,20 +650,7 @@ def sentiment_heatmap(request: Request, tickers: str = Query(default="")):
                 (ticker,),
             ).fetchone()
 
-            needs_fetch = row is None or seconds_since(row["fetched_at"]) > NEWS_CACHE_TTL
-
-            if needs_fetch:
-                articles = scrape_all(ticker)
-                articles = analyze_articles(articles)
-                conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
-                for a in articles:
-                    conn.execute(
-                        """INSERT INTO news (ticker, title, source, url, snippet, published,
-                           sentiment_score, sentiment_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (ticker, a["title"], a["source"], a["url"], a["snippet"],
-                         a["published"], a["sentiment"]["compound"], a["sentiment"]["label"]),
-                    )
-                conn.commit()
+            _refresh_news_if_stale(ticker, row["fetched_at"] if row else None)
 
             rows = conn.execute(
                 "SELECT source, sentiment_score FROM news WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 30",

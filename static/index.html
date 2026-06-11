@@ -566,6 +566,7 @@
           throw new Error(body.detail || res.statusText);
         }
         _data = await res.json();
+        localStorage.setItem("lastTicker", ticker);
 
         hideSkeleton("plot-skeleton");
         showEl("plot");
@@ -1336,7 +1337,12 @@
 
     // --- Init ---
     const urlTicker = new URLSearchParams(window.location.search).get("ticker");
-    if (urlTicker) document.getElementById("ticker").value = urlTicker.toUpperCase();
+    if (urlTicker) {
+      document.getElementById("ticker").value = urlTicker.toUpperCase();
+    } else {
+      const lastTicker = localStorage.getItem("lastTicker");
+      if (lastTicker) document.getElementById("ticker").value = lastTicker;
+    }
     // --- Toast ---
     function showToast(msg, duration = 4000) {
       const t = document.getElementById("toast");

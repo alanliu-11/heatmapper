@@ -23,6 +23,7 @@ Auth (OAuth2 refresh-token flow):
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import requests
@@ -38,6 +39,10 @@ REFRESH_SECRET_KEY = "questrade_refresh_token"
 
 # Batch size for the options-quotes endpoint (symbolIds per POST).
 _QUOTE_CHUNK = 100
+
+# Concurrent quote-batch requests. Questrade allows ~20 market-data requests
+# per second; 4 workers keeps us comfortably under that.
+_QUOTE_WORKERS = 4
 
 _lock = threading.Lock()
 _access_token = None
@@ -127,9 +132,13 @@ def _request(method: str, path: str, *, params=None, json=None) -> dict:
     )
 
     if resp.status_code == 401:
-        # Access token went stale early — force one refresh and retry.
+        # Access token went stale early — force one refresh and retry. Skip the
+        # refresh if another thread already rotated the token while we waited
+        # on the lock (quote batches run in parallel, so simultaneous 401s are
+        # possible and each refresh burns a single-use Questrade token).
         with _lock:
-            _refresh_access_token()
+            if token == _access_token:
+                _refresh_access_token()
             token, server = _access_token, _api_server
         url = f"{server}/{path.lstrip('/')}"
         resp = requests.request(
@@ -230,13 +239,21 @@ def fetch_all_expirations(ticker: str, max_expirations: int = 6) -> list[dict]:
                     all_ids.append(s["putSymbolId"])
         per_expiry.append((exp_ts, id_map))
 
-    # Batch-fetch quotes for every option id, keyed by symbolId.
+    # Batch-fetch quotes for every option id, keyed by symbolId. Batches run
+    # on a small thread pool: a liquid ticker like SPY can have thousands of
+    # contracts (dozens of batches), and doing them sequentially dominated
+    # load time.
     quotes_by_id: dict[int, dict] = {}
-    for i in range(0, len(all_ids), _QUOTE_CHUNK):
-        batch = all_ids[i : i + _QUOTE_CHUNK]
+    batches = [all_ids[i : i + _QUOTE_CHUNK] for i in range(0, len(all_ids), _QUOTE_CHUNK)]
+
+    def _fetch_batch(batch: list[int]) -> list[dict]:
         data = _request("POST", "v1/markets/quotes/options", json={"optionIds": batch})
-        for q in data.get("optionQuotes", []):
-            quotes_by_id[q["symbolId"]] = q
+        return data.get("optionQuotes", [])
+
+    with ThreadPoolExecutor(max_workers=_QUOTE_WORKERS) as pool:
+        for quotes in pool.map(_fetch_batch, batches):
+            for q in quotes:
+                quotes_by_id[q["symbolId"]] = q
 
     chains = []
     for exp_ts, id_map in per_expiry:
