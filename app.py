@@ -958,7 +958,7 @@ async def _background_scanner():
 # --- Cache Pre-warmer ---
 
 # Re-warm under the 15-min options-cache TTL so entries are replaced before
-# they expire and visitors (almost) never pay a cold Questrade fetch.
+# they expire and visitors (almost) never pay a cold fetch.
 PREWARM_INTERVAL = 10 * 60
 
 def _prewarm_tickers() -> None:

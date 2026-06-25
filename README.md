@@ -2,7 +2,7 @@
 
 Options intelligence platform that overlays real-time sentiment analysis on top of options flow data. Detects divergences between market positioning and crowd narrative.
 
-Built with FastAPI + Plotly.js + Postgres. Powered by **Bright Data** (SERP API + Web Unlocker API) and **VADER** sentiment analysis.
+Built with FastAPI + Plotly.js + Postgres. Powered by **Bright Data** (SERP API + Web Unlocker API) and **VADER** sentiment analysis. Options chains are fetched via `yfinance` (Yahoo) by default.
 
 ## Features
 
@@ -12,7 +12,7 @@ Built with FastAPI + Plotly.js + Postgres. Powered by **Bright Data** (SERP API 
 - **Company data** (market cap, P/E, EPS, beta, 52-week range) via Bright Data Web Unlocker API
 - **Per-ticker sentiment breakdown** with per-source scores and visual gauges
 - **Watchlist** with divergence scanning and push notifications
-- **Push notifications** (Web Push API) for divergence alerts, with background scanner every 15 min
+ - **Push notifications** (Web Push API) for divergence alerts, with background scanner every 15 minutes (may be delayed on free hosts)
 - **Dark mode** with system preference detection and localStorage persistence
 - **Skeleton loading states** for all data sections
 - **Auth system** with username/password login, JWT sessions
@@ -35,6 +35,8 @@ uvicorn app:app --reload
 ```
 
 The schema is created automatically on startup. Open [http://localhost:8000](http://localhost:8000).
+
+Note: the app's background scanner runs every 15 minutes when the service is active; on free hosting tiers that spin down, expect the scanner to pause and resume after cold starts.
 
 ## API
 

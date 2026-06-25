@@ -31,6 +31,9 @@ services:
         sync: false
       - key: BRIGHTDATA_API_TOKEN
         sync: false
+      # The app uses yfinance (Yahoo) by default for options chains; set
+      # third-party provider keys (BrightData, Tradier, Polygon) in the dashboard
+      # if you prefer a commercial data source.
 
 # Note: Render's free web service spins down after ~15 min of inactivity, so the
 # first request after idle is slow (~30s cold start) and the in-process background

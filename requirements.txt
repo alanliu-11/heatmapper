@@ -9,3 +9,4 @@ vaderSentiment
 requests
 pywebpush
 cryptography
+yfinance
